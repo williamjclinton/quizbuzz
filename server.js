@@ -1,255 +1,340 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
-app.use(express.static(path.join(__dirname, 'public')));
+const io = new Server(server);
+const PORT = process.env.PORT || 3000;
 
-const lobbies = {};
+app.use(express.static('public'));
 
-function genCode() {
-  let code;
-  do { code = String(Math.floor(1000 + Math.random() * 9000)); } while (lobbies[code]);
-  return code;
-}
-
-function getScoreboard(lobby) {
-  return [...lobby.players].sort((a,b) => b.score-a.score).map((p,i) => ({ rank:i+1, name:p.name, score:p.score }));
-}
-
-function normalize(s) {
-  return s.toLowerCase().trim().replace(/[.,!?'"-]/g,'').replace(/\s+/g,' ');
+// ── helpers ──────────────────────────────────────────────────────────────────
+function makeCode() {
+  return String(Math.floor(1000 + Math.random() * 9000));
 }
 
 function levenshtein(a, b) {
-  const m=a.length, n=b.length;
-  const dp=Array.from({length:m+1},(_,i)=>Array.from({length:n+1},(_,j)=>i===0?j:j===0?i:0));
-  for(let i=1;i<=m;i++) for(let j=1;j<=n;j++)
-    dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);
-  return dp[m][n];
+  a = a.toLowerCase().trim();
+  b = b.toLowerCase().trim();
+  const dp = Array.from({ length: a.length + 1 }, (_, i) =>
+    Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
+  );
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++)
+      dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1]
+        : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+  return dp[a.length][b.length];
 }
 
-function fuzzyMatch(input, correctAnswers) {
-  const norm=normalize(input);
-  for(const ans of correctAnswers){
-    const normAns=normalize(ans);
-    if(norm===normAns) return {match:true,score:1.0};
-    const maxDist=Math.max(1,Math.floor(normAns.length/4));
-    const dist=levenshtein(norm,normAns);
-    const sim=1-dist/Math.max(norm.length,normAns.length);
-    if(dist<=maxDist&&sim>=0.75) return {match:true,score:sim};
-  }
-  return {match:false,score:0};
+function fuzzyMatch(answer, correct) {
+  const a = answer.toLowerCase().trim();
+  const c = correct.toLowerCase().trim();
+  if (a === c) return { match: 'exact', ok: true };
+  const dist = levenshtein(a, c);
+  const threshold = Math.max(1, Math.floor(c.length * 0.25));
+  if (dist <= threshold) return { match: 'close', ok: true };
+  if (dist <= threshold * 2) return { match: 'partial', ok: false };
+  return { match: 'none', ok: false };
 }
 
-io.on('connection', (socket) => {
+// ── state ─────────────────────────────────────────────────────────────────────
+const rooms = {}; // code → room
 
-  socket.on('host:create', ({ questions, settings }) => {
-    const code = genCode();
-    lobbies[code] = {
-      hostId:socket.id, players:[], questions,
-      settings: settings||{scoreboardMode:'always', showFeedback:true},
-      currentQ:0, phase:'lobby', timer:null, answeredCount:0, openAnswers:{}
-    };
-    socket.join(code); socket.data.code=code; socket.data.role='host';
+function createRoom(hostId) {
+  const code = makeCode();
+  rooms[code] = {
+    code,
+    hostId,
+    players: {}, // socketId → { name, score, answers: [] }
+    quiz: null,
+    current: -1,
+    timer: null,
+    phase: 'lobby', // lobby | question | review | scoreboard | end
+    scoreboardMode: 'always', // always | host | end
+    showFeedback: true,
+    pendingGrades: {}, // qIdx → { socketId → { answer, result } }
+  };
+  return code;
+}
+
+function getScoreboard(room) {
+  return Object.values(room.players)
+    .sort((a, b) => b.score - a.score)
+    .map((p, i) => ({ name: p.name, score: p.score, rank: i + 1 }));
+}
+
+// ── socket ────────────────────────────────────────────────────────────────────
+io.on('connection', socket => {
+
+  // ── HOST: create quiz ──────────────────────────────────────────────────────
+  socket.on('host:create', ({ quiz, scoreboardMode, showFeedback }) => {
+    const code = createRoom(socket.id);
+    const room = rooms[code];
+    room.quiz = quiz;
+    room.scoreboardMode = scoreboardMode || 'always';
+    room.showFeedback = showFeedback !== false;
+    socket.join(code);
     socket.emit('host:created', { code });
   });
 
+  // ── PLAYER: join ──────────────────────────────────────────────────────────
   socket.on('player:join', ({ code, name }) => {
-    const lobby = lobbies[code];
-    if(!lobby) return socket.emit('error','Lobby niet gevonden.');
-    if(lobby.phase!=='lobby') return socket.emit('error','Quiz is al gestart.');
-    if(lobby.players.find(p=>p.name===name)) return socket.emit('error','Naam al in gebruik.');
-    lobby.players.push({
-      id:socket.id, name, score:0,
-      answered:false, lastAnswer:null, lastCorrect:null, lastPts:0,
-      history:[] // {qIndex, qText, playerAnswer, correctAnswer, correct}
+    const room = rooms[code];
+    if (!room) return socket.emit('error', 'Kamer niet gevonden.');
+    if (room.phase !== 'lobby') return socket.emit('error', 'Quiz is al begonnen.');
+    if (Object.values(room.players).some(p => p.name === name))
+      return socket.emit('error', 'Naam al in gebruik.');
+    room.players[socket.id] = { name, score: 0, answers: [] };
+    socket.join(code);
+    socket.emit('player:joined', { name });
+    io.to(code).emit('lobby:update', {
+      players: Object.values(room.players).map(p => p.name)
     });
-    socket.join(code); socket.data.code=code; socket.data.role='player'; socket.data.name=name;
-    socket.emit('player:joined',{name});
-    io.to(code).emit('lobby:update',{players:lobby.players.map(p=>p.name)});
   });
 
-  socket.on('host:start', () => {
-    const lobby=lobbies[socket.data.code];
-    if(!lobby||lobby.hostId!==socket.id) return;
-    lobby.currentQ=0; startQuestion(socket.data.code);
+  // ── HOST: start quiz ───────────────────────────────────────────────────────
+  socket.on('host:start', ({ code }) => {
+    const room = rooms[code];
+    if (!room || room.hostId !== socket.id) return;
+    sendQuestion(room, 0);
   });
 
-  socket.on('player:answer', ({ answerIndex }) => {
-    const code=socket.data.code; const lobby=lobbies[code];
-    if(!lobby||lobby.phase!=='question') return;
-    const player=lobby.players.find(p=>p.id===socket.id);
-    if(!player||player.answered) return;
-    const q=lobby.questions[lobby.currentQ];
-    if(q.type==='open') return;
-    player.answered=true; player.lastAnswer=answerIndex;
-    const correct=answerIndex===q.correct;
-    const pts=correct?Math.max(500,lobby.timeLeft*100):0;
-    player.score+=pts; player.lastPts=pts; player.lastCorrect=correct;
-    lobby.answeredCount++;
-    // Store history
-    player.history.push({
-      qIndex:lobby.currentQ, qText:q.text, type:'multiple',
-      playerAnswer:q.answers[answerIndex], correctAnswer:q.answers[q.correct], correct
-    });
-    const showFeedback=lobby.settings.showFeedback!==false;
-    socket.emit('player:feedback',{
-      correct, pts,
-      correctAnswer: showFeedback?q.correct:null,
-      correctText: showFeedback?q.answers[q.correct]:null,
-      showFeedback
-    });
-    io.to(lobby.hostId).emit('host:progress',{answered:lobby.answeredCount,total:lobby.players.length});
-    if(lobby.answeredCount>=lobby.players.length){ clearInterval(lobby.timer); endQuestion(code); }
+  // ── HOST: next question ────────────────────────────────────────────────────
+  socket.on('host:next', ({ code }) => {
+    const room = rooms[code];
+    if (!room || room.hostId !== socket.id) return;
+    const nextIdx = room.current + 1;
+    if (nextIdx >= room.quiz.length) return endQuiz(room);
+    sendQuestion(room, nextIdx);
   });
 
-  socket.on('player:open_answer', ({ text }) => {
-    const code=socket.data.code; const lobby=lobbies[code];
-    if(!lobby||lobby.phase!=='question') return;
-    const player=lobby.players.find(p=>p.id===socket.id);
-    if(!player||player.answered) return;
-    const q=lobby.questions[lobby.currentQ];
-    if(q.type!=='open') return;
-    player.answered=true; player.lastAnswer=text;
-    const {match,score}=fuzzyMatch(text,q.correctAnswers||[]);
-    player.lastCorrect=match;
-    const pts=match?Math.max(500,lobby.timeLeft*100):0;
-    player.score+=pts; player.lastPts=pts;
-    lobby.answeredCount++;
-    // Store history (correct answer set after grading, pre-fill now)
-    player.history.push({
-      qIndex:lobby.currentQ, qText:q.text, type:'open',
-      playerAnswer:text, correctAnswer:(q.correctAnswers||[]).join(' / '), correct:match
+  // ── HOST: show scoreboard then next ───────────────────────────────────────
+  socket.on('host:show_scoreboard', ({ code }) => {
+    const room = rooms[code];
+    if (!room || room.hostId !== socket.id) return;
+    io.to(code).emit('scoreboard:show', {
+      scoreboard: getScoreboard(room),
+      isLast: room.current >= room.quiz.length - 1
     });
-    lobby.openAnswers[socket.id]={playerId:socket.id,name:player.name,text,autoCorrect:match,fuzzyScore:score};
-    socket.emit('player:open_received',{text,autoCorrect:match,showFeedback:lobby.settings.showFeedback!==false});
-    io.to(lobby.hostId).emit('host:open_answer',{playerId:socket.id,name:player.name,text,autoCorrect:match,fuzzyScore:score});
-    io.to(lobby.hostId).emit('host:progress',{answered:lobby.answeredCount,total:lobby.players.length});
   });
 
-  socket.on('host:grade', ({ playerId, correct }) => {
-    const code=socket.data.code; const lobby=lobbies[code];
-    if(!lobby||lobby.hostId!==socket.id) return;
-    const player=lobby.players.find(p=>p.id===playerId);
-    if(!player) return;
-    const wasCorrect=player.lastCorrect;
-    if(correct&&!wasCorrect){
-      const pts=Math.max(500,(lobby.timeLeft||0)*100);
-      player.score+=pts; player.lastPts=pts; player.lastCorrect=true;
-    } else if(!correct&&wasCorrect){
-      player.score-=(player.lastPts||0); player.lastPts=0; player.lastCorrect=false;
+  // ── HOST: skip scoreboard ──────────────────────────────────────────────────
+  socket.on('host:skip_scoreboard', ({ code }) => {
+    const room = rooms[code];
+    if (!room || room.hostId !== socket.id) return;
+    const nextIdx = room.current + 1;
+    if (nextIdx >= room.quiz.length) return endQuiz(room);
+    sendQuestion(room, nextIdx);
+  });
+
+  // ── PLAYER: answer (multiple choice) ──────────────────────────────────────
+  socket.on('player:answer', ({ code, answer, timeLeft }) => {
+    const room = rooms[code];
+    if (!room || room.phase !== 'question') return;
+    const q = room.quiz[room.current];
+    if (q.type !== 'multiple') return;
+    const player = room.players[socket.id];
+    if (!player) return;
+    // prevent double answer
+    if (player.answers[room.current] !== undefined) return;
+
+    const correct = answer === q.correctAnswer;
+    const pts = correct ? Math.max(100, Math.round(500 * (timeLeft / q.timeLimit))) : 0;
+    player.score += pts;
+    player.answers[room.current] = { answer, correct, pts };
+
+    socket.emit('player:answer_ack', {
+      correct,
+      pts,
+      correctAnswer: correct ? null : q.correctAnswer,
+      correctText: correct ? null : q.answers[q.correctAnswer],
+      showFeedback: room.showFeedback
+    });
+
+    // Check if all players answered
+    const answered = Object.values(room.players).filter(p => p.answers[room.current] !== undefined).length;
+    if (answered >= Object.keys(room.players).length) {
+      clearTimeout(room.timer);
+      endQuestion(room);
     }
-    // Update history
-    const h=player.history[player.history.length-1];
-    if(h) h.correct=correct;
-    const showFeedback=lobby.settings.showFeedback!==false;
-    io.to(playerId).emit('player:grade_update',{correct,showFeedback});
-    socket.emit('host:grade_ack',{playerId,correct});
   });
 
-  socket.on('host:end_question', () => {
-    const code=socket.data.code; const lobby=lobbies[code];
-    if(!lobby||lobby.hostId!==socket.id) return;
-    clearInterval(lobby.timer); endQuestion(code);
+  // ── PLAYER: open answer ────────────────────────────────────────────────────
+  socket.on('player:open_answer', ({ code, answer }) => {
+    const room = rooms[code];
+    if (!room || room.phase !== 'question') return;
+    const q = room.quiz[room.current];
+    if (q.type !== 'open') return;
+    const player = room.players[socket.id];
+    if (!player || player.answers[room.current] !== undefined) return;
+
+    const result = fuzzyMatch(answer, q.correctAnswer);
+    player.answers[room.current] = { answer, result, pts: 0 };
+    socket.emit('player:open_received', { text: answer });
+
+    // Store for host review
+    if (!room.pendingGrades[room.current]) room.pendingGrades[room.current] = {};
+    room.pendingGrades[room.current][socket.id] = {
+      name: player.name,
+      answer,
+      result,
+      graded: false
+    };
+
+    // Send updated review panel to host
+    io.to(room.hostId).emit('host:review_update', {
+      grades: Object.values(room.pendingGrades[room.current]).map(g => ({
+        socketId: Object.entries(room.pendingGrades[room.current])
+          .find(([, v]) => v === g)[0],
+        ...g
+      }))
+    });
   });
 
-  socket.on('host:scoreboard_decision', ({ show }) => {
-    const code=socket.data.code; const lobby=lobbies[code];
-    if(!lobby||lobby.hostId!==socket.id) return;
-    const isLast=lobby.currentQ+1>=lobby.questions.length;
-    if(show){
-      io.to(code).emit('show:scoreboard',{scoreboard:getScoreboard(lobby),isLast,sub:'Tussenstand'});
+  // ── HOST: grade open answer ────────────────────────────────────────────────
+  socket.on('host:grade', ({ code, playerId, correct }) => {
+    const room = rooms[code];
+    if (!room || room.hostId !== socket.id) return;
+    const player = room.players[playerId];
+    if (!player) return;
+    const q = room.quiz[room.current];
+    const grade = room.pendingGrades[room.current]?.[playerId];
+    if (!grade) return;
+
+    grade.graded = true;
+    grade.override = correct;
+
+    if (correct) {
+      const pts = 500;
+      player.score += pts;
+      player.answers[room.current].pts = pts;
+      player.answers[room.current].correct = true;
     } else {
-      lobby.currentQ++;
-      if(lobby.currentQ>=lobby.questions.length) endQuiz(code); else startQuestion(code);
+      player.answers[room.current].correct = false;
+    }
+
+    io.to(playerId).emit('player:grade_update', { correct, showFeedback: room.showFeedback });
+  });
+
+  // ── HOST: done reviewing open question ────────────────────────────────────
+  socket.on('host:review_done', ({ code }) => {
+    const room = rooms[code];
+    if (!room || room.hostId !== socket.id) return;
+    endQuestion(room);
+  });
+
+  // ── HOST: end question manually ───────────────────────────────────────────
+  socket.on('host:end_question', ({ code }) => {
+    const room = rooms[code];
+    if (!room || room.hostId !== socket.id) return;
+    clearTimeout(room.timer);
+    if (room.quiz[room.current].type === 'open') {
+      room.phase = 'review';
+      io.to(room.hostId).emit('host:start_review');
+    } else {
+      endQuestion(room);
     }
   });
 
-  socket.on('host:next', () => {
-    const code=socket.data.code; const lobby=lobbies[code];
-    if(!lobby||lobby.hostId!==socket.id) return;
-    lobby.currentQ++;
-    if(lobby.currentQ>=lobby.questions.length) endQuiz(code); else startQuestion(code);
-  });
-
-  // Player requests their own history
-  socket.on('player:get_history', () => {
-    const code=socket.data.code; const lobby=lobbies[code];
-    if(!lobby) return;
-    const player=lobby.players.find(p=>p.id===socket.id);
-    if(!player) return;
-    socket.emit('player:history',{history:player.history,name:player.name,score:player.score});
-  });
-
+  // ── disconnect ─────────────────────────────────────────────────────────────
   socket.on('disconnect', () => {
-    const code=socket.data.code;
-    if(!code||!lobbies[code]) return;
-    const lobby=lobbies[code];
-    if(lobby.hostId===socket.id){
-      io.to(code).emit('error','Host heeft de verbinding verbroken.');
-      clearInterval(lobby.timer); delete lobbies[code];
-    } else {
-      lobby.players=lobby.players.filter(p=>p.id!==socket.id);
-      io.to(code).emit('lobby:update',{players:lobby.players.map(p=>p.name)});
+    for (const [code, room] of Object.entries(rooms)) {
+      if (room.hostId === socket.id) {
+        io.to(code).emit('error', 'Host heeft de verbinding verbroken.');
+        delete rooms[code];
+      } else if (room.players[socket.id]) {
+        delete room.players[socket.id];
+        io.to(code).emit('lobby:update', {
+          players: Object.values(room.players).map(p => p.name)
+        });
+      }
     }
   });
 });
 
-function startQuestion(code) {
-  const lobby=lobbies[code];
-  lobby.phase='question'; lobby.answeredCount=0; lobby.openAnswers={};
-  lobby.players.forEach(p=>{p.answered=false;p.lastAnswer=null;p.lastCorrect=null;p.lastPts=0;});
-  const q=lobby.questions[lobby.currentQ];
-  lobby.timeLeft=q.timeLimit||15;
-  io.to(code).emit('question:start',{
-    index:lobby.currentQ,total:lobby.questions.length,
-    text:q.text,type:q.type||'multiple',answers:q.answers||[],
-    youtubeId:q.youtubeId||null,timeLeft:lobby.timeLeft
+// ── helpers ───────────────────────────────────────────────────────────────────
+function sendQuestion(room, idx) {
+  room.current = idx;
+  room.phase = 'question';
+  const q = room.quiz[idx];
+  const isLast = idx === room.quiz.length - 1;
+
+  // Build question packet (no correct answer sent to players)
+  const base = {
+    idx,
+    total: room.quiz.length,
+    text: q.text,
+    type: q.type,
+    timeLimit: q.timeLimit || (q.type === 'open' ? 30 : 15),
+    isLast,
+    image: q.image || null,
+    audio: q.audio || null,
+  };
+
+  const hostPkt = { ...base, correctAnswer: q.correctAnswer, answers: q.answers };
+  const playerPkt = { ...base, answers: q.type === 'multiple' ? q.answers : null };
+
+  io.to(room.hostId).emit('question:start', hostPkt);
+  Object.keys(room.players).forEach(pid => {
+    io.to(pid).emit('question:start', playerPkt);
   });
-  lobby.timer=setInterval(()=>{
-    lobby.timeLeft--;
-    io.to(code).emit('question:tick',{timeLeft:lobby.timeLeft,maxTime:q.timeLimit||15});
-    if(lobby.timeLeft<=0){clearInterval(lobby.timer);endQuestion(code);}
-  },1000);
+
+  // Timer
+  room.timer = setTimeout(() => {
+    if (q.type === 'open') {
+      room.phase = 'review';
+      io.to(room.hostId).emit('host:start_review');
+    } else {
+      endQuestion(room);
+    }
+  }, base.timeLimit * 1000);
 }
 
-function endQuestion(code) {
-  const lobby=lobbies[code]; lobby.phase='scores';
-  const q=lobby.questions[lobby.currentQ];
-  const isLast=lobby.currentQ+1>=lobby.questions.length;
-  const mode=lobby.settings.scoreboardMode||'always';
-  io.to(code).emit('question:end',{
-    type:q.type||'multiple',correctAnswer:q.correct,
-    correctText:q.type==='open'?(q.correctAnswers||[]).join(' / '):(q.answers||[])[q.correct],
+function endQuestion(room) {
+  room.phase = 'scoreboard';
+  const q = room.quiz[room.current];
+  const isLast = room.current >= room.quiz.length - 1;
+  const scoreboard = getScoreboard(room);
+
+  const pkt = {
+    type: q.type,
+    correctAnswer: q.correctAnswer,
+    correctText: q.type === 'multiple' ? q.answers[q.correctAnswer] : q.correctAnswer,
+    scoreboard,
     isLast
-  });
-  if(mode==='always'||(mode==='end'&&isLast)){
-    io.to(code).emit('show:scoreboard',{scoreboard:getScoreboard(lobby),isLast,sub:isLast?'Eindstand':'Tussenstand'});
-  } else if(mode==='host'){
-    io.to(lobby.hostId).emit('host:scoreboard_prompt',{scoreboard:getScoreboard(lobby),isLast});
-    lobby.players.forEach(p=>io.to(p.id).emit('player:waiting_host'));
-  } else {
-    if(!isLast){ lobby.currentQ++; startQuestion(code); }
-    else io.to(code).emit('show:scoreboard',{scoreboard:getScoreboard(lobby),isLast:true,sub:'Eindstand'});
+  };
+
+  io.to(room.code).emit('question:end', pkt);
+
+  if (room.scoreboardMode === 'always') {
+    io.to(room.code).emit('scoreboard:show', { scoreboard, isLast });
+  } else if (room.scoreboardMode === 'host') {
+    io.to(room.hostId).emit('host:scoreboard_decision', { scoreboard, isLast });
   }
+  // 'end' → nothing shown yet
 }
 
-function endQuiz(code) {
-  const lobby=lobbies[code]; lobby.phase='ended';
-  // Send each player their personal history token
-  lobby.players.forEach(p=>{
-    io.to(p.id).emit('quiz:end',{
-      scoreboard:getScoreboard(lobby),
-      history:p.history, name:p.name, score:p.score
+function endQuiz(room) {
+  room.phase = 'end';
+  const scoreboard = getScoreboard(room);
+
+  // Build answer histories for players
+  Object.entries(room.players).forEach(([pid, player]) => {
+    const history = room.quiz.map((q, i) => {
+      const ans = player.answers[i];
+      return {
+        text: q.text,
+        yourAnswer: ans ? (q.type === 'multiple' ? q.answers[ans.answer] : ans.answer) : '—',
+        correct: ans ? ans.correct : false,
+        correctAnswer: q.type === 'multiple' ? q.answers[q.correctAnswer] : q.correctAnswer,
+        pts: ans ? ans.pts : 0,
+      };
     });
+    io.to(pid).emit('quiz:end', { scoreboard, history });
   });
-  io.to(lobby.hostId).emit('quiz:end',{scoreboard:getScoreboard(lobby),history:null});
-  setTimeout(()=>delete lobbies[code],60000);
+
+  io.to(room.hostId).emit('quiz:end', { scoreboard, history: null });
 }
 
-const PORT=process.env.PORT||3000;
-server.listen(PORT,()=>console.log(`QuizBuzz draait op http://localhost:${PORT}`));
+server.listen(PORT, () => console.log(`QuizBuzz v6 running on :${PORT}`));
