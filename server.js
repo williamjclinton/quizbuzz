@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const express = require('express');
 const http = require('http');
+const https = require('https');
 const { Server } = require('socket.io');
 
 const app = express();
@@ -9,9 +10,42 @@ const server = http.createServer(app);
 const io = new Server(server);
 const PORT = process.env.PORT || 3000;
 
+// ── Pexels API key — vul hier je eigen key in (gratis op pexels.com/api) ──
+const PEXELS_API_KEY = process.env.PEXELS_API_KEY || '';
+
 app.use(express.static('public'));
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// ── Pexels proxy route (key nooit zichtbaar in frontend) ──────────────────
+app.get('/api/pexels', (req, res) => {
+  const q = req.query.q;
+  if (!q) return res.status(400).json({ error: 'missing query' });
+  if (!PEXELS_API_KEY) return res.status(503).json({ error: 'no_key' });
+
+  const url = `https://api.pexels.com/v1/search?query=${encodeURIComponent(q)}&per_page=6&orientation=landscape`;
+  const options = { headers: { Authorization: PEXELS_API_KEY } };
+
+  https.get(url, options, r => {
+    let data = '';
+    r.on('data', c => data += c);
+    r.on('end', () => {
+      try {
+        const json = JSON.parse(data);
+        const photos = (json.photos || []).map(p => ({
+          thumb: p.src.medium,
+          full: p.src.large,
+          alt: p.alt || '',
+          photographer: p.photographer,
+          pexels_url: p.url
+        }));
+        res.json({ photos });
+      } catch(e) {
+        res.status(500).json({ error: 'parse_error' });
+      }
+    });
+  }).on('error', e => res.status(500).json({ error: e.message }));
+});
+
+// ── helpers ───────────────────────────────────────────────────────────────
 function makeCode() {
   return String(Math.floor(1000 + Math.random() * 9000));
 }
@@ -32,6 +66,7 @@ function levenshtein(a, b) {
 function fuzzyMatch(answer, correct) {
   const a = answer.toLowerCase().trim();
   const c = correct.toLowerCase().trim();
+  if (!c) return { match: 'exact', ok: true };
   if (a === c) return { match: 'exact', ok: true };
   const dist = levenshtein(a, c);
   const threshold = Math.max(1, Math.floor(c.length * 0.25));
@@ -40,22 +75,21 @@ function fuzzyMatch(answer, correct) {
   return { match: 'none', ok: false };
 }
 
-// ── state ─────────────────────────────────────────────────────────────────────
-const rooms = {}; // code → room
+// ── state ─────────────────────────────────────────────────────────────────
+const rooms = {};
 
 function createRoom(hostId) {
   const code = makeCode();
   rooms[code] = {
-    code,
-    hostId,
-    players: {}, // socketId → { name, score, answers: [] }
+    code, hostId,
+    players: {},      // socketId → { name, score, answers: [] }
     quiz: null,
     current: -1,
     timer: null,
-    phase: 'lobby', // lobby | question | review | scoreboard | end
-    scoreboardMode: 'always', // always | host | end
+    phase: 'lobby',
+    scoreboardMode: 'always',
     showFeedback: true,
-    pendingGrades: {}, // qIdx → { socketId → { answer, result } }
+    pendingGrades: {},
   };
   return code;
 }
@@ -66,10 +100,9 @@ function getScoreboard(room) {
     .map((p, i) => ({ name: p.name, score: p.score, rank: i + 1 }));
 }
 
-// ── socket ────────────────────────────────────────────────────────────────────
+// ── socket ────────────────────────────────────────────────────────────────
 io.on('connection', socket => {
 
-  // ── HOST: create quiz ──────────────────────────────────────────────────────
   socket.on('host:create', ({ quiz, scoreboardMode, showFeedback }) => {
     const code = createRoom(socket.id);
     const room = rooms[code];
@@ -80,7 +113,6 @@ io.on('connection', socket => {
     socket.emit('host:created', { code });
   });
 
-  // ── PLAYER: join ──────────────────────────────────────────────────────────
   socket.on('player:join', ({ code, name }) => {
     const room = rooms[code];
     if (!room) return socket.emit('error', 'Kamer niet gevonden.');
@@ -95,14 +127,12 @@ io.on('connection', socket => {
     });
   });
 
-  // ── HOST: start quiz ───────────────────────────────────────────────────────
   socket.on('host:start', ({ code }) => {
     const room = rooms[code];
     if (!room || room.hostId !== socket.id) return;
     sendQuestion(room, 0);
   });
 
-  // ── HOST: next question ────────────────────────────────────────────────────
   socket.on('host:next', ({ code }) => {
     const room = rooms[code];
     if (!room || room.hostId !== socket.id) return;
@@ -111,7 +141,6 @@ io.on('connection', socket => {
     sendQuestion(room, nextIdx);
   });
 
-  // ── HOST: show scoreboard then next ───────────────────────────────────────
   socket.on('host:show_scoreboard', ({ code }) => {
     const room = rooms[code];
     if (!room || room.hostId !== socket.id) return;
@@ -121,7 +150,6 @@ io.on('connection', socket => {
     });
   });
 
-  // ── HOST: skip scoreboard ──────────────────────────────────────────────────
   socket.on('host:skip_scoreboard', ({ code }) => {
     const room = rooms[code];
     if (!room || room.hostId !== socket.id) return;
@@ -130,16 +158,14 @@ io.on('connection', socket => {
     sendQuestion(room, nextIdx);
   });
 
-  // ── PLAYER: answer (multiple choice) ──────────────────────────────────────
+  // ── Multiple choice answer ──────────────────────────────────────────────
   socket.on('player:answer', ({ code, answer, timeLeft }) => {
     const room = rooms[code];
     if (!room || room.phase !== 'question') return;
     const q = room.quiz[room.current];
     if (q.type !== 'multiple') return;
     const player = room.players[socket.id];
-    if (!player) return;
-    // prevent double answer
-    if (player.answers[room.current] !== undefined) return;
+    if (!player || player.answers[room.current] !== undefined) return;
 
     const correct = answer === q.correctAnswer;
     const pts = correct ? Math.max(100, Math.round(500 * (timeLeft / q.timeLimit))) : 0;
@@ -147,22 +173,21 @@ io.on('connection', socket => {
     player.answers[room.current] = { answer, correct, pts };
 
     socket.emit('player:answer_ack', {
-      correct,
-      pts,
+      correct, pts,
       correctAnswer: correct ? null : q.correctAnswer,
       correctText: correct ? null : q.answers[q.correctAnswer],
       showFeedback: room.showFeedback
     });
 
-    // Check if all players answered
-    const answered = Object.values(room.players).filter(p => p.answers[room.current] !== undefined).length;
+    const answered = Object.values(room.players)
+      .filter(p => p.answers[room.current] !== undefined).length;
     if (answered >= Object.keys(room.players).length) {
       clearTimeout(room.timer);
       endQuestion(room);
     }
   });
 
-  // ── PLAYER: open answer ────────────────────────────────────────────────────
+  // ── Open answer ─────────────────────────────────────────────────────────
   socket.on('player:open_answer', ({ code, answer }) => {
     const room = rooms[code];
     if (!room || room.phase !== 'question') return;
@@ -173,65 +198,88 @@ io.on('connection', socket => {
 
     const result = fuzzyMatch(answer, q.correctAnswer);
     player.answers[room.current] = { answer, result, pts: 0 };
-    socket.emit('player:open_received', { text: answer });
+    socket.emit('player:open_received', {});
 
-    // Store for host review
     if (!room.pendingGrades[room.current]) room.pendingGrades[room.current] = {};
-    room.pendingGrades[room.current][socket.id] = {
-      name: player.name,
-      answer,
-      result,
-      graded: false
-    };
+    room.pendingGrades[room.current][socket.id] = { name: player.name, answer, result, graded: false };
 
-    // Send updated review panel to host
-    io.to(room.hostId).emit('host:review_update', {
-      grades: Object.values(room.pendingGrades[room.current]).map(g => ({
-        socketId: Object.entries(room.pendingGrades[room.current])
-          .find(([, v]) => v === g)[0],
-        ...g
-      }))
-    });
+    emitReviewUpdate(room);
   });
 
-  // ── HOST: grade open answer ────────────────────────────────────────────────
-  socket.on('host:grade', ({ code, playerId, correct }) => {
+  // ── Music answer (artiest + titel) ──────────────────────────────────────
+  socket.on('player:music_answer', ({ code, artist, title }) => {
+    const room = rooms[code];
+    if (!room || room.phase !== 'question') return;
+    const q = room.quiz[room.current];
+    if (q.type !== 'music') return;
+    const player = room.players[socket.id];
+    if (!player || player.answers[room.current] !== undefined) return;
+
+    const artistResult = fuzzyMatch(artist, q.correctArtist);
+    const titleResult  = fuzzyMatch(title,  q.correctTitle);
+
+    player.answers[room.current] = { artist, title, artistResult, titleResult, pts: 0 };
+    socket.emit('player:open_received', {});
+
+    if (!room.pendingGrades[room.current]) room.pendingGrades[room.current] = {};
+    room.pendingGrades[room.current][socket.id] = {
+      name: player.name, artist, title, artistResult, titleResult, graded: false, isMusic: true
+    };
+
+    emitReviewUpdate(room);
+  });
+
+  // ── Grade ───────────────────────────────────────────────────────────────
+  socket.on('host:grade', ({ code, playerId, correct, pts }) => {
     const room = rooms[code];
     if (!room || room.hostId !== socket.id) return;
     const player = room.players[playerId];
     if (!player) return;
-    const q = room.quiz[room.current];
     const grade = room.pendingGrades[room.current]?.[playerId];
     if (!grade) return;
 
     grade.graded = true;
-    grade.override = correct;
+    const awarded = correct ? (pts !== undefined ? pts : 500) : 0;
+    player.score += awarded;
+    player.answers[room.current].pts = awarded;
+    player.answers[room.current].correct = correct;
 
-    if (correct) {
-      const pts = 500;
-      player.score += pts;
-      player.answers[room.current].pts = pts;
-      player.answers[room.current].correct = true;
-    } else {
-      player.answers[room.current].correct = false;
-    }
-
-    io.to(playerId).emit('player:grade_update', { correct, showFeedback: room.showFeedback });
+    io.to(playerId).emit('player:grade_update', { correct, pts: awarded, showFeedback: room.showFeedback });
   });
 
-  // ── HOST: done reviewing open question ────────────────────────────────────
   socket.on('host:review_done', ({ code }) => {
     const room = rooms[code];
     if (!room || room.hostId !== socket.id) return;
     endQuestion(room);
   });
 
-  // ── HOST: end question manually ───────────────────────────────────────────
+  // ── Host signals music has stopped → start timer now ───────────────────
+  socket.on('host:music_done', ({ code }) => {
+    const room = rooms[code];
+    if (!room || room.hostId !== socket.id) return;
+    if (room.phase !== 'music_playing') return;
+    const q = room.quiz[room.current];
+    const timeLimit = q.timeLimit || (q.type === 'open' ? 30 : q.type === 'music' ? 45 : 15);
+    room.phase = 'question';
+    // Tell everyone the timer is now starting
+    io.to(room.code).emit('question:timer_start', { timeLimit });
+    room.timer = setTimeout(() => {
+      const t = room.quiz[room.current].type;
+      if (t === 'open' || t === 'music') {
+        room.phase = 'review';
+        io.to(room.hostId).emit('host:start_review');
+      } else {
+        endQuestion(room);
+      }
+    }, timeLimit * 1000);
+  });
+
   socket.on('host:end_question', ({ code }) => {
     const room = rooms[code];
     if (!room || room.hostId !== socket.id) return;
     clearTimeout(room.timer);
-    if (room.quiz[room.current].type === 'open') {
+    const type = room.quiz[room.current].type;
+    if (type === 'open' || type === 'music') {
       room.phase = 'review';
       io.to(room.hostId).emit('host:start_review');
     } else {
@@ -239,7 +287,6 @@ io.on('connection', socket => {
     }
   });
 
-  // ── disconnect ─────────────────────────────────────────────────────────────
   socket.on('disconnect', () => {
     for (const [code, room] of Object.entries(rooms)) {
       if (room.hostId === socket.id) {
@@ -255,42 +302,48 @@ io.on('connection', socket => {
   });
 });
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-function sendQuestion(room, idx) {
-  room.current = idx;
-  room.phase = 'question';
-  const q = room.quiz[idx];
-  const isLast = idx === room.quiz.length - 1;
+function emitReviewUpdate(room) {
+  const grades = Object.entries(room.pendingGrades[room.current] || {}).map(([sid, g]) => ({
+    socketId: sid, ...g
+  }));
+  io.to(room.hostId).emit('host:review_update', { grades });
+}
 
-  // Build question packet (no correct answer sent to players)
-  const base = {
-    idx,
-    total: room.quiz.length,
-    text: q.text,
-    type: q.type,
-    timeLimit: q.timeLimit || (q.type === 'open' ? 30 : 15),
-    isLast,
-    image: q.image || null,
-    audio: q.audio || null,
-  };
-
-  const hostPkt = { ...base, correctAnswer: q.correctAnswer, answers: q.answers };
-  const playerPkt = { ...base, answers: q.type === 'multiple' ? q.answers : null };
-
-  io.to(room.hostId).emit('question:start', hostPkt);
-  Object.keys(room.players).forEach(pid => {
-    io.to(pid).emit('question:start', playerPkt);
-  });
-
-  // Timer
+function startQuestionTimer(room, timeLimit) {
   room.timer = setTimeout(() => {
-    if (q.type === 'open') {
+    const t = room.quiz[room.current].type;
+    if (t === 'open' || t === 'music') {
       room.phase = 'review';
       io.to(room.hostId).emit('host:start_review');
     } else {
       endQuestion(room);
     }
-  }, base.timeLimit * 1000);
+  }, timeLimit * 1000);
+}
+
+function sendQuestion(room, idx) {
+  room.current = idx;
+  const q = room.quiz[idx];
+  const isLast = idx === room.quiz.length - 1;
+  const timeLimit = q.timeLimit || (q.type === 'open' ? 30 : q.type === 'music' ? 45 : 15);
+  const hasAudio = !!q.audio;
+
+  // If audio present: hold in music_playing phase; timer starts only after host:music_done
+  room.phase = hasAudio ? 'music_playing' : 'question';
+
+  const base = { idx, total: room.quiz.length, text: q.text, type: q.type, timeLimit, isLast,
+                 image: q.image || null, hasAudio };
+  const hostPkt   = { ...base, audio: q.audio || null,
+                      correctAnswer: q.correctAnswer, correctArtist: q.correctArtist,
+                      correctTitle: q.correctTitle, answers: q.answers };
+  const playerPkt = { ...base, audio: null,
+                      answers: q.type === 'multiple' ? q.answers : null };
+
+  io.to(room.hostId).emit('question:start', hostPkt);
+  Object.keys(room.players).forEach(pid => io.to(pid).emit('question:start', playerPkt));
+
+  if (!hasAudio) startQuestionTimer(room, timeLimit);
+  // With audio: timer starts when host fires host:music_done
 }
 
 function endQuestion(room) {
@@ -299,39 +352,42 @@ function endQuestion(room) {
   const isLast = room.current >= room.quiz.length - 1;
   const scoreboard = getScoreboard(room);
 
-  const pkt = {
+  io.to(room.code).emit('question:end', {
     type: q.type,
     correctAnswer: q.correctAnswer,
     correctText: q.type === 'multiple' ? q.answers[q.correctAnswer] : q.correctAnswer,
-    scoreboard,
-    isLast
-  };
-
-  io.to(room.code).emit('question:end', pkt);
+    correctArtist: q.correctArtist,
+    correctTitle: q.correctTitle,
+    scoreboard, isLast
+  });
 
   if (room.scoreboardMode === 'always') {
     io.to(room.code).emit('scoreboard:show', { scoreboard, isLast });
   } else if (room.scoreboardMode === 'host') {
     io.to(room.hostId).emit('host:scoreboard_decision', { scoreboard, isLast });
   }
-  // 'end' → nothing shown yet
 }
 
 function endQuiz(room) {
   room.phase = 'end';
   const scoreboard = getScoreboard(room);
 
-  // Build answer histories for players
   Object.entries(room.players).forEach(([pid, player]) => {
     const history = room.quiz.map((q, i) => {
       const ans = player.answers[i];
-      return {
-        text: q.text,
-        yourAnswer: ans ? (q.type === 'multiple' ? q.answers[ans.answer] : ans.answer) : '—',
-        correct: ans ? ans.correct : false,
-        correctAnswer: q.type === 'multiple' ? q.answers[q.correctAnswer] : q.correctAnswer,
-        pts: ans ? ans.pts : 0,
-      };
+      let yourAnswer = '—';
+      let correctAnswer = '';
+      if (q.type === 'multiple') {
+        yourAnswer = ans ? q.answers[ans.answer] : '—';
+        correctAnswer = q.answers[q.correctAnswer];
+      } else if (q.type === 'music') {
+        yourAnswer = ans ? `${ans.artist} / ${ans.title}` : '—';
+        correctAnswer = `${q.correctArtist} / ${q.correctTitle}`;
+      } else {
+        yourAnswer = ans ? ans.answer : '—';
+        correctAnswer = q.correctAnswer;
+      }
+      return { text: q.text, yourAnswer, correct: ans?.correct || false, correctAnswer, pts: ans?.pts || 0 };
     });
     io.to(pid).emit('quiz:end', { scoreboard, history });
   });
@@ -339,4 +395,4 @@ function endQuiz(room) {
   io.to(room.hostId).emit('quiz:end', { scoreboard, history: null });
 }
 
-server.listen(PORT, () => console.log(`QuizBuzz v6 running on :${PORT}`));
+server.listen(PORT, () => console.log(`QuizBuzz v6.1 running on :${PORT}`));
