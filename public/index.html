@@ -418,10 +418,15 @@ function buildAudioHtml(q, i) {
         <p style="color:var(--muted);font-size:.78rem;margin-top:4px">Nummer moet publiek staan op SoundCloud</p>` : ''}
       ${t==='url' ? `<input type="text" placeholder="Directe MP3-URL (https://…/nummer.mp3)" value="${esc(q.audio?.url||'')}" oninput="setAudioDirectUrl(${i},this.value)">` : ''}
       ${t==='spotify' ? `
-        <div class="row" style="gap:6px">
-          <input type="text" id="spotify-q-${i}" placeholder="Zoek op artiest + nummer…" style="flex:1"
-            onkeydown="if(event.key==='Enter')searchSpotify(${i})">
-          <button class="btn btn-outline btn-sm" style="border-color:#1db954;color:#1db954" onclick="searchSpotify(${i})">Zoeken</button>
+        <div class="col" style="gap:6px">
+          <div class="row" style="gap:6px">
+            <input type="text" id="spotify-q-${i}" placeholder="Songtitel…" style="flex:1"
+              onkeydown="if(event.key==='Enter')searchSpotify(${i})">
+            <input type="text" id="spotify-artist-${i}" placeholder="Artiest (optioneel)" style="flex:1"
+              onkeydown="if(event.key==='Enter')searchSpotify(${i})">
+            <button class="btn btn-sm" style="background:#1db954;color:#000;font-weight:700" onclick="searchSpotify(${i})">Zoeken</button>
+          </div>
+          <p style="color:var(--muted);font-size:.78rem">Tip: vul ook de artiest in voor betere resultaten. Tracks zonder preview zijn grijs.</p>
         </div>
         <div id="spotify-results-${i}" style="margin-top:8px"></div>
       ` : ''}
@@ -497,31 +502,38 @@ function setAudioDirectUrl(i,v){ if(v.startsWith('http')) questions[i].audio={ty
 
 async function searchSpotify(i) {
   const q = document.getElementById(`spotify-q-${i}`)?.value.trim();
+  const artist = document.getElementById(`spotify-artist-${i}`)?.value.trim() || '';
   if (!q) return;
   const el = document.getElementById(`spotify-results-${i}`);
   el.innerHTML = '<span style="color:var(--muted);font-size:.85rem">Zoeken op Spotify…</span>';
   try {
-    const res = await fetch(`/api/spotify-search?q=${encodeURIComponent(q)}`);
+    const url = `/api/spotify-search?q=${encodeURIComponent(q)}${artist ? '&artist='+encodeURIComponent(artist) : ''}`;
+    const res = await fetch(url);
     const data = await res.json();
     if (data.error === 'no_key') {
       el.innerHTML = '<p style="color:var(--red);font-size:.82rem">Geen Spotify API keys ingesteld. Voeg SPOTIFY_CLIENT_ID en SPOTIFY_CLIENT_SECRET toe als environment variables.</p>';
       return;
     }
     if (!data.tracks?.length) {
-      el.innerHTML = '<p style="color:var(--muted);font-size:.82rem">Geen resultaten met preview gevonden. Probeer een andere zoekterm.</p>';
+      el.innerHTML = '<p style="color:var(--muted);font-size:.82rem">Geen resultaten gevonden. Probeer een andere zoekterm.</p>';
       return;
     }
-    el.innerHTML = data.tracks.map((t, idx) => `
-      <div class="spotify-track" id="spotify-track-${i}-${idx}" onclick="pickSpotify(${i},${idx})">
+    el.innerHTML = data.tracks.map((t, idx) => {
+      const hasPreview = !!t.previewUrl;
+      return `<div class="spotify-track${hasPreview ? '' : ' no-preview'}" id="spotify-track-${i}-${idx}"
+          onclick="${hasPreview ? `pickSpotify(${i},${idx})` : ''}"
+          style="${!hasPreview ? 'opacity:.45;cursor:not-allowed' : ''}">
         <div class="spotify-track-info">
           <div class="spotify-track-name">${esc(t.name)}</div>
-          <div class="spotify-track-sub">${esc(t.albumName||'')} · ${(t.releaseDate||'').slice(0,4)}</div>
+          <div class="spotify-track-sub">${esc(t.albumName||'')} · ${(t.releaseDate||'').slice(0,4)}${!hasPreview ? ' · <em>geen preview</em>' : ''}</div>
         </div>
         <div class="spotify-track-preview">
-          <audio src="${t.previewUrl}" style="height:28px;width:160px" controls onclick="event.stopPropagation()"></audio>
+          ${hasPreview
+            ? `<audio src="${t.previewUrl}" style="height:28px;width:160px" controls onclick="event.stopPropagation()"></audio>`
+            : `<span style="font-size:.75rem;color:var(--muted)">Niet beschikbaar</span>`}
         </div>
-      </div>`).join('');
-    // Store results for picking
+      </div>`;
+    }).join('');
     window._spotifyResults = window._spotifyResults || {};
     window._spotifyResults[i] = data.tracks;
   } catch(e) {

@@ -49,22 +49,25 @@ app.get('/api/pexels', (req, res) => {
 // ── Spotify preview search route ──────────────────────────────────────────
 app.get('/api/spotify-search', async (req, res) => {
   const q = req.query.q;
+  const artist = req.query.artist || '';
   if (!q) return res.status(400).json({ error: 'missing query' });
   if (!process.env.SPOTIFY_CLIENT_ID || !process.env.SPOTIFY_CLIENT_SECRET)
     return res.status(503).json({ error: 'no_key' });
   try {
-    const result = await spotifyPreviewFinder(q, 5);
+    // Use artist parameter if provided for higher accuracy
+    const result = artist
+      ? await spotifyPreviewFinder(q, artist, 10)
+      : await spotifyPreviewFinder(q, 10);
     if (!result.success) return res.status(500).json({ error: result.error });
-    const tracks = result.results
-      .filter(t => t.previewUrls && t.previewUrls.length > 0)
-      .map(t => ({
-        name: t.name,
-        spotifyUrl: t.spotifyUrl,
-        previewUrl: t.previewUrls[0],
-        albumName: t.albumName,
-        releaseDate: t.releaseDate,
-        popularity: t.popularity,
-      }));
+    // Return all results, flag whether preview is available
+    const tracks = result.results.map(t => ({
+      name: t.name,
+      spotifyUrl: t.spotifyUrl,
+      previewUrl: t.previewUrls?.[0] || null,
+      albumName: t.albumName,
+      releaseDate: t.releaseDate,
+      popularity: t.popularity,
+    }));
     res.json({ tracks });
   } catch(e) {
     res.status(500).json({ error: e.message });
