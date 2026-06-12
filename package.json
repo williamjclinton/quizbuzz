@@ -4,5 +4,9 @@
   "description": "Real-time multiplayer quiz",
   "main": "server.js",
   "scripts": { "start": "node server.js" },
-  "dependencies": { "express": "^4.18.2", "socket.io": "^4.7.2" }
+  "dependencies": {
+  	"dotenv": "^16.0.0",
+  	"express": "...",
+  	"socket.io": "..."
+	}
 }
