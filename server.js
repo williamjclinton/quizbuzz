@@ -4,6 +4,7 @@ const express = require('express');
 const http = require('http');
 const https = require('https');
 const { Server } = require('socket.io');
+const spotifyPreviewFinder = require('spotify-preview-finder');
 
 const app = express();
 const server = http.createServer(app);
@@ -43,6 +44,31 @@ app.get('/api/pexels', (req, res) => {
       }
     });
   }).on('error', e => res.status(500).json({ error: e.message }));
+});
+
+// ── Spotify preview search route ──────────────────────────────────────────
+app.get('/api/spotify-search', async (req, res) => {
+  const q = req.query.q;
+  if (!q) return res.status(400).json({ error: 'missing query' });
+  if (!process.env.SPOTIFY_CLIENT_ID || !process.env.SPOTIFY_CLIENT_SECRET)
+    return res.status(503).json({ error: 'no_key' });
+  try {
+    const result = await spotifyPreviewFinder(q, 5);
+    if (!result.success) return res.status(500).json({ error: result.error });
+    const tracks = result.results
+      .filter(t => t.previewUrls && t.previewUrls.length > 0)
+      .map(t => ({
+        name: t.name,
+        spotifyUrl: t.spotifyUrl,
+        previewUrl: t.previewUrls[0],
+        albumName: t.albumName,
+        releaseDate: t.releaseDate,
+        popularity: t.popularity,
+      }));
+    res.json({ tracks });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ── helpers ───────────────────────────────────────────────────────────────
@@ -395,4 +421,4 @@ function endQuiz(room) {
   io.to(room.hostId).emit('quiz:end', { scoreboard, history: null });
 }
 
-server.listen(PORT, () => console.log(`QuizBuzz v6.1 running on :${PORT}`));
+server.listen(PORT, () => console.log(`QuizBuzz v6.2 running on :${PORT}`));

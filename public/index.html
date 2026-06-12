@@ -114,6 +114,14 @@ audio{width:100%;border-radius:8px}
 @keyframes bounce{from{transform:translateY(0)}to{transform:translateY(-10px)}}
 /* Timer visibility wrapper */
 .timer-section{transition:opacity .3s}
+/* Spotify search results */
+.spotify-track{display:flex;align-items:center;gap:10px;padding:8px 10px;background:#252540;border-radius:8px;margin-bottom:6px;cursor:pointer;border:2px solid transparent;transition:border .15s}
+.spotify-track:hover{border-color:#1db954}
+.spotify-track.chosen{border-color:#1db954;background:#0d2e1a}
+.spotify-track-info{flex:1;min-width:0}
+.spotify-track-name{font-weight:700;font-size:.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.spotify-track-sub{font-size:.78rem;color:var(--muted)}
+.spotify-track-preview{flex-shrink:0}
 </style>
 </head>
 <body>
@@ -401,6 +409,7 @@ function buildAudioHtml(q, i) {
       <button class="btn btn-sm ${t==='upload'?'btn-primary':'btn-outline'}" onclick="setAudioType(${i},'upload')">📁 Upload MP3</button>
       <button class="btn btn-sm ${t==='soundcloud'?'btn-primary':'btn-outline'}" onclick="setAudioType(${i},'soundcloud')">☁️ SoundCloud</button>
       <button class="btn btn-sm ${t==='url'?'btn-primary':'btn-outline'}" onclick="setAudioType(${i},'url')">🔗 Audio-URL</button>
+      <button class="btn btn-sm ${t==='spotify'?'btn-primary':'btn-outline'}" style="${t!=='spotify'?'border-color:#1db954;color:#1db954':''}" onclick="setAudioType(${i},'spotify')">🎧 Spotify</button>
     </div>
     <input type="file" id="audio-file-${i}" accept="audio/*" style="display:none" onchange="handleAudioUpload(${i},this)">
     <div id="audio-input-${i}">
@@ -408,6 +417,14 @@ function buildAudioHtml(q, i) {
       ${t==='soundcloud' ? `<input type="text" placeholder="https://soundcloud.com/artiest/nummer" value="${esc(q.audio?.url||'')}" oninput="setSCUrl(${i},this.value)">
         <p style="color:var(--muted);font-size:.78rem;margin-top:4px">Nummer moet publiek staan op SoundCloud</p>` : ''}
       ${t==='url' ? `<input type="text" placeholder="Directe MP3-URL (https://…/nummer.mp3)" value="${esc(q.audio?.url||'')}" oninput="setAudioDirectUrl(${i},this.value)">` : ''}
+      ${t==='spotify' ? `
+        <div class="row" style="gap:6px">
+          <input type="text" id="spotify-q-${i}" placeholder="Zoek op artiest + nummer…" style="flex:1"
+            onkeydown="if(event.key==='Enter')searchSpotify(${i})">
+          <button class="btn btn-outline btn-sm" style="border-color:#1db954;color:#1db954" onclick="searchSpotify(${i})">Zoeken</button>
+        </div>
+        <div id="spotify-results-${i}" style="margin-top:8px"></div>
+      ` : ''}
     </div>
     ${hasAudio ? `<p style="color:var(--green);font-size:.83rem;margin-top:6px">✅ Audio ingesteld</p>
       <button class="btn btn-red btn-sm" style="margin-top:4px" onclick="removeAudio(${i})">✕ Verwijder audio</button>` : ''}
@@ -477,6 +494,69 @@ function handleAudioUpload(i,input){
 }
 function setSCUrl(i,v){ if(v.includes('soundcloud.com')) questions[i].audio={type:'soundcloud',url:v}; }
 function setAudioDirectUrl(i,v){ if(v.startsWith('http')) questions[i].audio={type:'url',url:v}; }
+
+async function searchSpotify(i) {
+  const q = document.getElementById(`spotify-q-${i}`)?.value.trim();
+  if (!q) return;
+  const el = document.getElementById(`spotify-results-${i}`);
+  el.innerHTML = '<span style="color:var(--muted);font-size:.85rem">Zoeken op Spotify…</span>';
+  try {
+    const res = await fetch(`/api/spotify-search?q=${encodeURIComponent(q)}`);
+    const data = await res.json();
+    if (data.error === 'no_key') {
+      el.innerHTML = '<p style="color:var(--red);font-size:.82rem">Geen Spotify API keys ingesteld. Voeg SPOTIFY_CLIENT_ID en SPOTIFY_CLIENT_SECRET toe als environment variables.</p>';
+      return;
+    }
+    if (!data.tracks?.length) {
+      el.innerHTML = '<p style="color:var(--muted);font-size:.82rem">Geen resultaten met preview gevonden. Probeer een andere zoekterm.</p>';
+      return;
+    }
+    el.innerHTML = data.tracks.map((t, idx) => `
+      <div class="spotify-track" id="spotify-track-${i}-${idx}" onclick="pickSpotify(${i},${idx})">
+        <div class="spotify-track-info">
+          <div class="spotify-track-name">${esc(t.name)}</div>
+          <div class="spotify-track-sub">${esc(t.albumName||'')} · ${(t.releaseDate||'').slice(0,4)}</div>
+        </div>
+        <div class="spotify-track-preview">
+          <audio src="${t.previewUrl}" style="height:28px;width:160px" controls onclick="event.stopPropagation()"></audio>
+        </div>
+      </div>`).join('');
+    // Store results for picking
+    window._spotifyResults = window._spotifyResults || {};
+    window._spotifyResults[i] = data.tracks;
+  } catch(e) {
+    el.innerHTML = `<p style="color:var(--red);font-size:.82rem">Fout: ${e.message}</p>`;
+  }
+}
+
+function pickSpotify(i, idx) {
+  const tracks = window._spotifyResults?.[i];
+  if (!tracks || !tracks[idx]) return;
+  const t = tracks[idx];
+  questions[i].audio = { type: 'url', url: t.previewUrl, label: t.name };
+  // Visual feedback
+  document.querySelectorAll(`[id^="spotify-track-${i}-"]`).forEach(el => el.classList.remove('chosen'));
+  document.getElementById(`spotify-track-${i}-${idx}`)?.classList.add('chosen');
+  // Auto-fill correctArtist / correctTitle for music questions if empty
+  if (questions[i].type === 'music') {
+    const parts = t.name.split(' - ');
+    if (parts.length >= 2 && !questions[i].correctTitle) {
+      questions[i].correctTitle = parts.slice(1).join(' - ');
+    }
+    if (!questions[i].correctArtist && parts.length >= 2) {
+      questions[i].correctArtist = parts[0];
+    }
+  }
+  // Show confirmation
+  const el = document.getElementById(`spotify-results-${i}`);
+  const conf = document.createElement('p');
+  conf.style.cssText = 'color:#1db954;font-size:.83rem;margin-top:6px';
+  conf.textContent = `✅ Gekozen: ${t.name}`;
+  // Remove old confirmation if any
+  el.parentNode.querySelectorAll('.spotify-confirm').forEach(e=>e.remove());
+  conf.className = 'spotify-confirm';
+  el.parentNode.appendChild(conf);
+}
 function removeAudio(i){ questions[i].audio=null; renderEditor(); reopenExpand(i); }
 
 // ── Host actions ───────────────────────────────────────────────────────────
