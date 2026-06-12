@@ -1,766 +1,587 @@
 <!DOCTYPE html>
 <html lang="nl">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <title>QuizBuzz</title>
+<script src="/socket.io/socket.io.js"></script>
 <style>
-:root {
-  --bg:#0f0f1a; --card:#1a1a2e; --accent:#6c63ff; --accent2:#ff6584;
-  --green:#43d17a; --red:#ff4f5a; --yellow:#ffd166; --text:#e8e8f0; --muted:#888; --radius:12px;
-}
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--text);font-family:'Segoe UI',sans-serif;min-height:100vh}
-.screen{display:none;padding:20px;max-width:820px;margin:0 auto}
-.screen.active{display:block}
-h1{font-size:2.2rem;color:var(--accent);margin-bottom:8px}
-h2{font-size:1.4rem;margin-bottom:16px}
-h3{font-size:1rem;margin-bottom:10px;color:var(--muted)}
-.btn{padding:11px 22px;border-radius:var(--radius);border:none;cursor:pointer;font-size:.95rem;font-weight:700;transition:opacity .15s,transform .1s}
-.btn:active{transform:scale(.97)}
-.btn-primary{background:var(--accent);color:#fff}
-.btn-green{background:var(--green);color:#000}
-.btn-red{background:var(--red);color:#fff}
-.btn-yellow{background:var(--yellow);color:#000}
-.btn-outline{background:transparent;border:2px solid var(--accent);color:var(--accent)}
-.btn-sm{padding:6px 14px;font-size:.82rem}
-.btn:disabled{opacity:.4;cursor:default}
-input[type=text],input[type=number],select,textarea{background:#252540;border:1px solid #3a3a60;color:var(--text);border-radius:8px;padding:9px 13px;font-size:.93rem;width:100%}
-input:focus,select:focus,textarea:focus{outline:2px solid var(--accent)}
-label{display:block;margin-bottom:4px;font-size:.82rem;color:var(--muted)}
-.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.col{display:flex;flex-direction:column;gap:8px}
-.card{background:var(--card);border-radius:var(--radius);padding:18px;margin-bottom:14px}
-.tag{display:inline-block;padding:2px 8px;border-radius:6px;font-size:.75rem;font-weight:700}
-.tag-green{background:#1e4a30;color:var(--green)}
-.tag-orange{background:#4a2e0a;color:var(--yellow)}
-.tag-red{background:#4a1015;color:var(--red)}
-.tag-gray{background:#333;color:var(--muted)}
-.tag-purple{background:#2a1a50;color:#a78bfa}
-.divider{border:none;border-top:1px solid #2a2a4a;margin:12px 0}
-/* Lobby */
-.code{font-size:3.5rem;font-weight:900;letter-spacing:10px;color:var(--accent);text-align:center;padding:20px 0}
-.player-chips{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
-.chip{background:#252540;border-radius:20px;padding:6px 14px;font-size:.9rem}
-/* Question */
-.q-img{width:100%;max-height:260px;object-fit:cover;border-radius:10px;margin-bottom:14px}
-.q-audio-wrap{margin-bottom:14px}
-audio{width:100%;border-radius:8px}
-.sc-embed{width:100%;border:none;border-radius:10px;margin-bottom:14px}
-.ans-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
-.ans-btn{padding:18px 14px;border-radius:10px;border:none;cursor:pointer;font-size:1rem;font-weight:700;color:#fff;text-align:left}
-.ans-btn:nth-child(1){background:#e63946}
-.ans-btn:nth-child(2){background:#2a9d8f}
-.ans-btn:nth-child(3){background:#e9c46a;color:#000}
-.ans-btn:nth-child(4){background:#6c63ff}
-.ans-btn:disabled{cursor:default}
-.ans-btn.selected{outline:3px solid #fff}
-.timer-bar-wrap{background:#252540;border-radius:6px;height:10px;overflow:hidden;margin-bottom:14px}
-.timer-bar{height:100%;background:var(--accent);transition:width 1s linear}
-.timer-num{text-align:right;font-size:.85rem;color:var(--muted);margin-bottom:5px}
-/* Feedback */
-.fb{padding:13px 17px;border-radius:10px;font-size:1rem;font-weight:700;margin-top:13px}
-.fb-ok{background:#1e4a30;color:var(--green)}
-.fb-no{background:#4a1015;color:var(--red)}
-.fb-neutral{background:#252540;color:var(--muted)}
-/* Scoreboard */
-.score-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #2a2a4a}
-.s-rank{font-size:1.3rem;width:36px;text-align:center}
-.s-name{flex:1;font-weight:600}
-.s-bar-wrap{flex:2;background:#252540;border-radius:4px;height:12px;overflow:hidden}
-.s-bar{height:100%;background:var(--accent);transition:width .8s ease}
-.s-pts{font-weight:700;color:var(--yellow);min-width:70px;text-align:right}
-/* Review */
-.review-card{background:#252540;border-radius:10px;padding:13px;margin-bottom:8px}
-.rc-head{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
-.rc-answer{font-size:.95rem;margin-bottom:8px}
-.rc-btns{display:flex;gap:8px;flex-wrap:wrap}
-.rc-pts-input{width:80px}
-/* Editor */
-.q-item{background:#252540;border-radius:10px;padding:13px;margin-bottom:9px}
-.q-item-head{display:flex;align-items:center;gap:8px;cursor:pointer}
-.q-item-num{background:var(--accent);border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:.8rem;font-weight:700;flex-shrink:0}
-.q-expand{background:#1a1a2e;border-radius:10px;padding:13px;margin-top:9px;display:none}
-.q-expand.open{display:block}
-.img-preview{max-width:200px;max-height:120px;object-fit:cover;border-radius:8px;margin-top:8px}
-.pexels-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px}
-.pexels-grid img{width:100%;height:80px;object-fit:cover;border-radius:6px;cursor:pointer;border:2px solid transparent;transition:border .15s}
-.pexels-grid img:hover{border-color:var(--accent)}
-.pexels-grid img.chosen{border-color:var(--green)}
-.pexels-credit{font-size:.7rem;color:var(--muted);margin-top:4px}
-/* Music input on player side */
-.music-inputs{display:flex;flex-direction:column;gap:10px;margin-top:10px}
-.music-inputs input{font-size:1rem;padding:12px 14px}
+body{font-family:'Inter',system-ui,sans-serif;background:linear-gradient(135deg,#f0efff 0%,#e8f4ff 100%);color:#1a1a2e;min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:1.5rem 1rem}
+.card{background:#fff;border-radius:20px;padding:2rem;width:100%;max-width:720px;box-shadow:0 4px 32px rgba(83,74,183,.13)}
+h1{font-size:26px;font-weight:700;margin-bottom:.25rem;letter-spacing:-.3px}
+h2{font-size:20px;font-weight:700;margin-bottom:.5rem}
+.sub{font-size:15px;color:#666;margin-bottom:1.25rem}
+input[type=text],input[type=url],input[type=number]{width:100%;padding:11px 15px;border:1.5px solid #ddd;border-radius:12px;font-size:15px;margin-bottom:.6rem;outline:none;transition:border .2s,box-shadow .2s;font-family:inherit}
+input[type=text]:focus,input[type=url]:focus,input[type=number]:focus{border-color:#534AB7;box-shadow:0 0 0 3px rgba(83,74,183,.12)}
+select{width:100%;padding:11px 15px;border:1.5px solid #ddd;border-radius:12px;font-size:15px;margin-bottom:.6rem;outline:none;background:#fff;cursor:pointer;transition:border .2s}
+select:focus{border-color:#534AB7}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:11px 22px;border-radius:12px;border:none;font-size:15px;font-weight:600;cursor:pointer;transition:background .15s,transform .1s,box-shadow .15s}
+.btn:active{transform:scale(.98)}
+.btn-p{background:#534AB7;color:#fff}.btn-p:hover{background:#3C3489}
+.btn-sec{background:#eeedfe;color:#534AB7}.btn-sec:hover{background:#dddcfc}
+.btn-ok{background:#EAF3DE;color:#3B6D11;border:1.5px solid #97C459}.btn-ok:hover{background:#d4ecc0}
+.btn-no{background:#FCEBEB;color:#A32D2D;border:1.5px solid #F09595}.btn-no:hover{background:#f5d0d0}
+.btn-warn{background:#FEF3E2;color:#633806;border:1.5px solid #F5BF6A}.btn-warn:hover{background:#fdeac8}
+.btn-music{background:#a238ff;color:#fff}.btn-music:hover{background:#8620e0}
+.btn-sm{padding:7px 14px;font-size:13px}
+.btn-full{width:100%;justify-content:center;margin-top:.5rem}
+.tabs{display:flex;gap:8px;margin-bottom:1.25rem}
+.tab{padding:7px 18px;border-radius:20px;font-size:13px;cursor:pointer;border:1.5px solid transparent;color:#888;background:#f0eff8}
+.tab.active{background:#eeedfe;color:#534AB7;border-color:#afa9ec}
+.code-box{background:#eeedfe;border-radius:12px;padding:1.25rem;text-align:center;margin:1rem 0}
+.code-num{font-size:52px;font-weight:800;letter-spacing:12px;color:#3C3489;font-family:monospace}
+.chip{background:#f0eff8;border-radius:20px;padding:5px 14px;font-size:13px;color:#534AB7}
+.player-chips{display:flex;flex-wrap:wrap;gap:8px;margin:.75rem 0}
+.ans-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:.75rem 0}
+.ans-btn{padding:18px 16px;border-radius:14px;border:none;font-size:15px;font-weight:600;cursor:pointer;color:#fff;text-align:left;transition:transform .15s,opacity .2s,box-shadow .15s;line-height:1.4;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+.ans-btn:hover{transform:scale(1.02);box-shadow:0 4px 14px rgba(0,0,0,.2)}.ans-btn:active{transform:scale(.97)}
+.ans-btn:disabled{opacity:.5;cursor:default;transform:none}
+.ans-btn.correct{outline:3px solid #3B6D11}
+.a0{background:#185FA5}.a1{background:#A32D2D}.a2{background:#3B6D11}.a3{background:#854F0B}
+.timer{font-size:52px;font-weight:800;color:#534AB7;text-align:center;padding:.25rem 0;transition:color .3s;letter-spacing:-2px}
+.timer.urgent{color:#A32D2D}
+.progress{height:5px;background:#eee;border-radius:3px;margin:.6rem 0;overflow:hidden}
+.progress-fill{height:100%;background:#534AB7;border-radius:3px;transition:width .9s linear}
+.fb{padding:11px 15px;border-radius:10px;margin:.6rem 0;font-size:14px;font-weight:500}
+.fb-ok{background:#EAF3DE;color:#3B6D11}
+.fb-no{background:#FCEBEB;color:#A32D2D}
+.fb-wait{background:#f0eff8;color:#534AB7}
+.fb-neutral{background:#f5f4fe;color:#666}
+.fb-part{background:#FEF3E2;color:#633806}
+.score-row{display:flex;align-items:center;gap:10px;padding:9px 13px;background:#f5f4fe;border-radius:10px;margin-bottom:7px}
+.s-rank{font-size:13px;width:24px;text-align:center;flex-shrink:0}
+.s-name{font-size:15px;font-weight:600;min-width:80px;flex-shrink:0}
+.s-bar-wrap{flex:1;background:#eee;border-radius:20px;height:18px;overflow:hidden;position:relative}
+.s-bar{height:100%;background:linear-gradient(90deg,#534AB7,#8B85E8);border-radius:20px;transition:width .8s cubic-bezier(.4,0,.2,1);min-width:2px}
+.s-pts{font-size:15px;font-weight:700;color:#534AB7;min-width:60px;text-align:right;flex-shrink:0}
+.screen{display:none}.screen.active{display:block}
+.q-meta{font-size:12px;color:#888;margin-bottom:.25rem}
+.q-type-badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;margin-bottom:.5rem}
+.badge-multiple{background:#eeedfe;color:#534AB7}
+.badge-open{background:#EAF3DE;color:#3B6D11}
+.badge-music{background:#f3e8ff;color:#7e22ce}
+.review-panel{background:#f9f8ff;border:1.5px solid #afa9ec;border-radius:12px;padding:1rem;margin:.75rem 0}
+.review-panel h3{font-size:14px;font-weight:600;color:#3C3489;margin-bottom:.5rem;display:flex;align-items:center;gap:6px}
+.review-hint{font-size:12px;color:#666;margin-bottom:.75rem;line-height:1.5}
+.review-empty{font-size:13px;color:#999;text-align:center;padding:.5rem 0}
+.answer-card{background:#fff;border:1.5px solid #eee;border-radius:10px;padding:10px 13px;margin-bottom:8px;transition:border-color .2s,background .2s}
+.answer-card.graded-ok{border-color:#97C459;background:#f8fdf3}
+.answer-card.graded-part{border-color:#F5BF6A;background:#fefbf3}
+.answer-card.graded-no{border-color:#F09595;background:#fff8f8}
+.answer-card-top{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.player-avatar{width:28px;height:28px;border-radius:50%;background:#eeedfe;color:#534AB7;font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.player-name-sm{font-size:13px;font-weight:500;flex:1}
+.fuzzy-badge{font-size:11px;padding:2px 8px;border-radius:20px;font-weight:500}
+.fuzzy-auto{background:#EAF3DE;color:#3B6D11}
+.fuzzy-close{background:#FAEEDA;color:#633806}
+.fuzzy-wrong{background:#f0eff8;color:#666}
+.answer-text{font-size:15px;color:#1a1a2e;margin-bottom:8px;padding:6px 10px;background:#f5f4fe;border-radius:8px;font-style:italic}
+.grade-btns{display:flex;gap:8px;flex-wrap:wrap}
+.grade-result{font-size:13px;font-weight:500;padding:4px 10px;border-radius:20px;display:inline-block}
+.grade-result.ok{background:#EAF3DE;color:#3B6D11}
+.grade-result.part{background:#FEF3E2;color:#633806}
+.grade-result.no{background:#FCEBEB;color:#A32D2D}
+.settings-block{background:#f5f4fe;border-radius:12px;padding:1rem;margin-bottom:1rem;border:1.5px solid #ebe9fc}
+.settings-block h3{font-size:14px;font-weight:600;color:#3C3489;margin-bottom:.75rem}
+.field-label{font-size:12px;color:#888;margin-bottom:3px;margin-top:6px}
+.q-block{background:#f5f4fe;border-radius:10px;padding:11px;margin-bottom:8px;border:1.5px solid #ebe9fc}
+.progress-info{font-size:13px;color:#888;text-align:center;margin:.25rem 0}
+.decision-box{background:#fff8e1;border:1.5px solid #F5BF6A;border-radius:12px;padding:1.25rem;margin:.75rem 0;text-align:center}
+.decision-box p{font-size:14px;color:#633806;margin-bottom:.75rem}
+.decision-btns{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+/* Music player */
+.music-player{background:#f3e8ff;border:1.5px solid #c084fc;border-radius:12px;padding:1rem;margin:.75rem 0;text-align:center}
+.music-player p{font-size:13px;color:#7e22ce;margin-bottom:.75rem}
+.music-waiting{background:#f3e8ff;border-radius:10px;padding:1.25rem;text-align:center;margin:.75rem 0}
+.music-note{font-size:2rem;animation:bounce .7s infinite alternate}
+@keyframes bounce{from{transform:translateY(0)}to{transform:translateY(-8px)}}
+.music-inputs{display:flex;flex-direction:column;gap:8px;margin:.75rem 0}
+/* QR code */
+.qr-wrap{display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:.75rem}
+.qr-wrap canvas{border-radius:8px}
+.qr-label{font-size:11px;color:#888}
 /* History */
-.hist-item{padding:10px 0;border-bottom:1px solid #2a2a4a}
-.hist-item .hi-q{font-weight:600;margin-bottom:4px}
-.hist-item .hi-ans{font-size:.88rem}
-.hist-item.correct .hi-ans{color:var(--green)}
-.hist-item.wrong .hi-ans{color:var(--red)}
-.pill{background:var(--accent);color:#fff;border-radius:20px;padding:3px 12px;font-size:.8rem;display:inline-block}
-.wait-msg{text-align:center;padding:40px;color:var(--muted);font-size:1.1rem}
-.host-decision{background:var(--card);border-radius:var(--radius);padding:20px;margin-top:14px;text-align:center}
-.type-badge-multiple{color:#e63946}
-.type-badge-open{color:var(--yellow)}
-.type-badge-music{color:#a78bfa}
-/* Audio host controls */
-.audio-host-wrap{background:#1a1a2e;border-radius:10px;padding:14px;margin-bottom:14px}
-.audio-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px}
-.audio-hint{color:var(--muted);font-size:.8rem;margin-top:8px}
-/* Music waiting (player side) */
-.music-waiting{text-align:center;padding:20px;background:#1a1a2e;border-radius:10px;margin-bottom:14px}
-.music-note-anim{font-size:2.5rem;animation:bounce 0.7s infinite alternate}
-.music-waiting p{color:var(--muted);margin-top:8px}
-@keyframes bounce{from{transform:translateY(0)}to{transform:translateY(-10px)}}
-/* Timer visibility wrapper */
-.timer-section{transition:opacity .3s}
-/* Spotify search results */
-.spotify-track{display:flex;align-items:center;gap:10px;padding:8px 10px;background:#252540;border-radius:8px;margin-bottom:6px;cursor:pointer;border:2px solid transparent;transition:border .15s}
-.spotify-track:hover{border-color:#1db954}
-.spotify-track.chosen{border-color:#1db954;background:#0d2e1a}
-.spotify-track-info{flex:1;min-width:0}
-.spotify-track-name{font-weight:700;font-size:.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.spotify-track-sub{font-size:.78rem;color:var(--muted)}
-.spotify-track-preview{flex-shrink:0}
+.hist-item{padding:10px 0;border-bottom:1px solid #f0eff8}
+.hist-item:last-child{border-bottom:none}
+.hist-q{font-size:13px;font-weight:600;margin-bottom:3px}
+.hist-ans{font-size:12px;color:#666}
+.hist-ans.correct{color:#3B6D11}
+.hist-ans.wrong{color:#A32D2D}
+/* Deezer results */
+.deezer-track{display:flex;align-items:center;gap:8px;padding:7px 10px;background:#fff;border-radius:8px;margin-bottom:5px;cursor:pointer;border:1.5px solid #eee;transition:border .15s}
+.deezer-track:hover{border-color:#a238ff}
+.deezer-track.chosen{border-color:#a238ff;background:#faf5ff}
+.deezer-cover{width:36px;height:36px;border-radius:5px;object-fit:cover;flex-shrink:0}
+.deezer-info{flex:1;min-width:0}
+.deezer-title{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.deezer-sub{font-size:11px;color:#888}
+/* Pexels */
+.pexels-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-top:6px}
+.pexels-grid img{width:100%;height:70px;object-fit:cover;border-radius:6px;cursor:pointer;border:2px solid transparent;transition:border .15s}
+.pexels-grid img:hover{border-color:#534AB7}
+.pexels-grid img.chosen{border-color:#3B6D11}
+.pexels-credit{font-size:10px;color:#aaa;margin-top:3px}
+.img-preview-wrap{margin-top:6px}
+.img-preview-wrap img{max-width:100%;max-height:120px;border-radius:8px;object-fit:cover}
+/* Question image */
+.q-img{width:100%;max-height:220px;object-fit:cover;border-radius:10px;margin-bottom:.75rem}
 </style>
 </head>
 <body>
+<div class="card">
 
 <!-- HOME -->
 <div id="s-home" class="screen active">
-  <div style="text-align:center;padding:60px 20px 30px">
-    <h1>QuizBuzz ⚡</h1>
-    <p style="color:var(--muted);margin-bottom:40px">Real-time multiplayer quiz</p>
-    <div class="col" style="max-width:320px;margin:0 auto;gap:14px">
-      <button class="btn btn-primary" onclick="show('s-editor')">✏️ Quiz aanmaken (host)</button>
-      <button class="btn btn-outline" onclick="show('s-join')">🎮 Meedoen als speler</button>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem">
+    <div><h1>QuizBuzz 🎯</h1><p class="sub" style="margin:0">Maak een quiz aan en deel de link</p></div>
+  </div>
+  <div id="home-host">
+    <div class="settings-block">
+      <h3>⚙️ Quiz-instellingen</h3>
+      <div class="field-label">Scorebord tonen</div>
+      <select id="setting-scoreboard">
+        <option value="always">Na elke vraag</option>
+        <option value="host">Host bepaalt per vraag</option>
+        <option value="end">Alleen aan het einde</option>
+      </select>
+    </div>
+    <div id="q-editor"></div>
+    <div style="display:flex;gap:8px;margin-bottom:1rem;flex-wrap:wrap">
+      <button class="btn btn-sec btn-sm" onclick="addQ('multiple')">+ Meerkeuze</button>
+      <button class="btn btn-sec btn-sm" onclick="addQ('open')">+ Open vraag</button>
+      <button class="btn btn-sm" style="background:#f3e8ff;color:#7e22ce;border:1.5px solid #c084fc" onclick="addQ('music')">+ 🎵 Muziekvraag</button>
+    </div>
+    <button class="btn btn-p" onclick="createLobby()">🚀 Lobby aanmaken</button>
+  </div>
+  <div id="home-join" style="display:none">
+    <div style="background:#f0efff;border-radius:14px;padding:1.5rem;text-align:center;margin-bottom:1rem">
+      <div style="font-size:32px;margin-bottom:.5rem">🎉</div>
+      <p style="font-size:15px;color:#534AB7;font-weight:600">Je bent uitgenodigd voor een quiz!</p>
+    </div>
+    <input type="text" id="join-code" placeholder="Code (4 cijfers)" maxlength="4" style="font-size:28px;letter-spacing:8px;text-align:center;font-family:monospace"/>
+    <input type="text" id="join-name" placeholder="Jouw naam"/>
+    <button class="btn btn-p btn-full" onclick="joinLobby()">Deelnemen →</button>
+  </div>
+</div>
+
+<!-- HOST LOBBY -->
+<div id="s-host-lobby" class="screen">
+  <h1>Wachtkamer</h1>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div>
+      <div class="code-box">
+        <div class="code-num" id="lobby-code">----</div>
+        <div style="font-size:12px;color:#534AB7;margin-top:.25rem">Deel deze code</div>
+      </div>
+      <div class="qr-wrap" id="qr-wrap"></div>
+      <div id="join-url-display" style="margin-top:.5rem;font-size:12px;color:#888;word-break:break-all;text-align:center"></div>
+      <button class="btn btn-p btn-full" style="margin-top:.75rem" onclick="hostStart()">▶ Start quiz</button>
+    </div>
+    <div>
+      <p style="font-size:13px;color:#666;margin-bottom:.5rem">Spelers (<span id="lobby-count">0</span>)</p>
+      <div class="player-chips" id="lobby-list"></div>
     </div>
   </div>
 </div>
 
-<!-- JOIN -->
-<div id="s-join" class="screen">
-  <h2>Meedoen</h2>
-  <div class="card col" style="gap:12px">
-    <div><label>Code</label><input id="join-code" type="text" placeholder="4-cijferige code" maxlength="4"></div>
-    <div><label>Naam</label><input id="join-name" type="text" placeholder="Jouw naam"></div>
-    <div class="row">
-      <button class="btn btn-green" onclick="playerJoin()">Deelnemen</button>
-      <button class="btn btn-outline" onclick="show('s-home')">Terug</button>
+<!-- PLAYER LOBBY -->
+<div id="s-player-lobby" class="screen">
+  <h1>Ingelogd! ✅</h1>
+  <p class="sub" id="player-welcome"></p>
+  <div style="text-align:center;padding:1.5rem 0;color:#888;font-size:14px">⏳ Wachten tot de host start...</div>
+  <div class="player-chips" id="player-lobby-list"></div>
+</div>
+
+<!-- HOST QUESTION -->
+<div id="s-host-q" class="screen">
+  <div class="q-meta" id="hq-meta"></div>
+  <div class="progress"><div class="progress-fill" id="hq-prog" style="width:100%"></div></div>
+  <div style="display:flex;align-items:center;justify-content:space-between">
+    <div class="timer" id="hq-timer">–</div>
+    <div class="progress-info" id="hq-progress">0 / 0 geantwoord</div>
+  </div>
+  <div id="hq-img" style="display:none"><img id="hq-img-el" class="q-img" alt=""></div>
+  <div id="hq-music-player" style="display:none">
+    <div class="music-player">
+      <p>🎵 Speel de muziek af voor de spelers — de timer start zodra je op play klikt.</p>
+      <audio id="hq-audio" controls style="width:100%;margin-bottom:.75rem"></audio>
+      <button class="btn btn-p" id="hq-play-btn" onclick="hostPlayMusic()">▶ Afspelen &amp; timer starten</button>
     </div>
   </div>
+  <div id="hq-type-badge"></div>
+  <p style="font-size:18px;font-weight:700;margin:.5rem 0;line-height:1.4" id="hq-text"></p>
+  <div class="ans-grid" id="hq-answers"></div>
+
+  <div id="hq-review" style="display:none">
+    <div class="review-panel">
+      <h3>✏️ Antwoorden beoordelen <span id="hq-review-count" style="font-weight:400;color:#666;font-size:12px"></span></h3>
+      <div class="review-hint" id="hq-review-hint">Groen = automatisch goedgekeurd · Oranje = lijkt erop · Grijs = geen match. Je kunt altijd handmatig aanpassen.</div>
+      <div id="hq-answer-cards"><div class="review-empty">Wachten op antwoorden...</div></div>
+    </div>
+    <button class="btn btn-p" onclick="hostEndQuestion()" style="margin-top:.25rem">Klaar met beoordelen — Volgende →</button>
+  </div>
+
+  <div id="hq-next" style="display:none;margin-top:.75rem">
+    <button class="btn btn-p" onclick="hostEndQuestion()">Klaar — Volgende →</button>
+  </div>
 </div>
 
-<!-- EDITOR -->
-<div id="s-editor" class="screen">
-  <div class="row" style="margin-bottom:16px">
-    <h2 style="margin:0;flex:1">Quiz bewerken</h2>
-    <button class="btn btn-outline btn-sm" onclick="show('s-home')">← Terug</button>
-  </div>
-  <div class="card">
-    <h3>Instellingen</h3>
-    <div class="row" style="gap:14px">
-      <div style="flex:1"><label>Scorebord tonen</label>
-        <select id="e-scoreboardMode">
-          <option value="always">Na elke vraag</option>
-          <option value="host">Host bepaalt per vraag</option>
-          <option value="end">Alleen aan het einde</option>
-        </select></div>
-      <div style="flex:1"><label>Feedback aan spelers</label>
-        <select id="e-showFeedback">
-          <option value="1">Ja (goed/fout tonen)</option>
-          <option value="0">Nee (verborgen)</option>
-        </select></div>
+<!-- PLAYER QUESTION -->
+<div id="s-player-q" class="screen">
+  <div class="q-meta" id="pq-meta"></div>
+  <div class="progress"><div class="progress-fill" id="pq-prog" style="width:100%"></div></div>
+  <div class="timer" id="pq-timer">–</div>
+  <div id="pq-img" style="display:none"><img id="pq-img-el" class="q-img" alt=""></div>
+  <div id="pq-music-wait" style="display:none">
+    <div class="music-waiting">
+      <div class="music-note">🎵</div>
+      <p style="font-size:13px;color:#7e22ce;margin-top:.5rem">Luister naar de muziek…</p>
     </div>
   </div>
-  <div id="e-questions"></div>
-  <div class="row" style="gap:8px;margin-bottom:14px;flex-wrap:wrap">
-    <button class="btn btn-outline btn-sm" onclick="addQuestion('multiple')">+ Meerkeuze</button>
-    <button class="btn btn-outline btn-sm" onclick="addQuestion('open')">+ Open vraag</button>
-    <button class="btn btn-outline btn-sm" style="border-color:#a78bfa;color:#a78bfa" onclick="addQuestion('music')">+ 🎵 Muziekvraag</button>
+  <div id="pq-type-badge"></div>
+  <p style="font-size:18px;font-weight:700;margin:.5rem 0;line-height:1.4" id="pq-text"></p>
+  <div class="ans-grid" id="pq-answers"></div>
+  <div id="pq-open-input" style="display:none">
+    <input type="text" id="pq-open-text" placeholder="Jouw antwoord..."/>
+    <button class="btn btn-p btn-full" id="pq-submit-btn" onclick="submitOpen()">Versturen ✓</button>
   </div>
-  <button class="btn btn-green" onclick="hostCreate()">🚀 Quiz starten</button>
-</div>
-
-<!-- LOBBY -->
-<div id="s-lobby" class="screen">
-  <h2>Lobby</h2>
-  <div class="code" id="lobby-code">----</div>
-  <p style="text-align:center;color:var(--muted);margin-bottom:20px">Deel deze code met de deelnemers</p>
-  <div id="lobby-players" class="player-chips"></div>
-  <div style="margin-top:20px">
-    <button class="btn btn-green" onclick="hostStart()">▶ Quiz starten</button>
-  </div>
-</div>
-
-<!-- WAITING -->
-<div id="s-waiting" class="screen">
-  <div class="wait-msg"><div style="font-size:2rem">⏳</div><div id="wait-msg-text">Wachten tot de host de quiz start…</div></div>
-</div>
-
-<!-- QUESTION (host) -->
-<div id="s-hq" class="screen">
-  <div class="row" style="margin-bottom:8px">
-    <span id="hq-num" class="pill">Vraag 1/1</span>
-    <span id="hq-type-badge" style="margin-left:6px;font-size:.85rem"></span>
-    <span id="hq-timer-num" class="timer-num" style="margin-left:auto">15</span>
-  </div>
-  <div id="hq-timer-wrap"><div class="timer-bar-wrap"><div id="hq-timer-bar" class="timer-bar"></div></div></div>
-  <div id="hq-img-wrap"></div>
-  <div id="hq-audio-wrap"></div>
-  <div id="hq-text" style="font-size:1.25rem;font-weight:700;margin-bottom:14px"></div>
-  <div id="hq-answers" class="ans-grid"></div>
-  <div id="hq-open-label" style="display:none;color:var(--muted);font-size:.9rem;margin-top:10px"></div>
-  <div id="hq-correct-answer" style="display:none;margin-top:8px;padding:10px 14px;background:#1a1a2e;border-radius:8px;font-size:.9rem;color:var(--muted)"></div>
-  <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">
-    <button class="btn btn-yellow btn-sm" id="hq-end-btn" onclick="hostEndQuestion()">⏹ Vraag beëindigen</button>
-  </div>
-  <div id="hq-next" style="display:none;margin-top:10px">
-    <button class="btn btn-green" onclick="hostNext()">Volgende →</button>
-  </div>
-  <div id="hq-review-panel" style="display:none;margin-top:20px">
-    <h3>Antwoorden beoordelen</h3>
-    <div id="hq-review-cards"></div>
-    <button class="btn btn-green" style="margin-top:10px" onclick="hostReviewDone()">✅ Klaar met beoordelen — Volgende →</button>
-  </div>
-  <div id="hq-scoreboard-decision" class="host-decision" style="display:none">
-    <p style="margin-bottom:14px">Scorebord tonen aan spelers?</p>
-    <div class="row" style="justify-content:center;gap:10px">
-      <button class="btn btn-green" onclick="hostShowScoreboard()">Tonen</button>
-      <button class="btn btn-yellow" onclick="hostSkipScoreboard()">Overslaan</button>
-    </div>
-  </div>
-</div>
-
-<!-- QUESTION (player) -->
-<div id="s-pq" class="screen">
-  <div class="row" style="margin-bottom:8px">
-    <span id="pq-num" class="pill">Vraag 1/1</span>
-    <span id="pq-timer-num" class="timer-num" style="margin-left:auto">15</span>
-  </div>
-  <div id="pq-timer-wrap"><div class="timer-bar-wrap"><div id="pq-timer-bar" class="timer-bar"></div></div></div>
-  <div id="pq-img-wrap"></div>
-  <div id="pq-audio-wrap"></div>
-  <div id="pq-text" style="font-size:1.15rem;font-weight:700;margin-bottom:14px"></div>
-  <div id="pq-answers" class="ans-grid"></div>
-  <div id="pq-open-wrap" style="display:none">
-    <textarea id="pq-open-input" style="width:100%;min-height:80px;resize:vertical" placeholder="Typ je antwoord..."></textarea>
-    <button class="btn btn-primary" style="margin-top:8px" onclick="playerSendOpen()">Versturen</button>
-  </div>
-  <div id="pq-music-wrap" style="display:none">
-    <p style="color:var(--muted);font-size:.9rem;margin-bottom:8px">Vul artiest én songtitel in:</p>
+  <div id="pq-music-input" style="display:none">
     <div class="music-inputs">
-      <input type="text" id="pq-artist-input" placeholder="🎤 Artiest">
-      <input type="text" id="pq-title-input" placeholder="🎵 Songtitel">
+      <input type="text" id="pq-artist" placeholder="🎤 Artiest..."/>
+      <input type="text" id="pq-title" placeholder="🎵 Songtitel..."/>
     </div>
-    <button class="btn btn-primary" style="margin-top:10px" onclick="playerSendMusic()">Versturen</button>
+    <button class="btn btn-music btn-full" id="pq-music-submit" onclick="submitMusic()">Versturen ✓</button>
   </div>
   <div id="pq-fb"></div>
 </div>
 
 <!-- SCOREBOARD -->
-<div id="s-scoreboard" class="screen">
-  <h2>Tussenstand</h2>
-  <div id="sb-list"></div>
-  <div id="sb-next-wrap" style="margin-top:16px;display:none"></div>
+<div id="s-scores" class="screen">
+  <h2>Scorebord 📊</h2>
+  <p class="sub" id="scores-sub"></p>
+  <div id="scores-list"></div>
+  <div id="scores-decision" style="display:none">
+    <div class="decision-box">
+      <p>Wil je het scorebord tonen aan spelers?</p>
+      <div class="decision-btns">
+        <button class="btn btn-ok" onclick="scoreboardDecision(true)">✓ Tonen aan spelers</button>
+        <button class="btn btn-warn" onclick="scoreboardDecision(false)">→ Overslaan, volgende vraag</button>
+      </div>
+    </div>
+  </div>
+  <div id="scores-host-next" style="display:none;margin-top:1rem">
+    <button class="btn btn-p" id="next-q-btn" onclick="hostNext()">Volgende vraag →</button>
+    <button class="btn btn-sec btn-sm" style="margin-left:8px" onclick="resetAll()">🔄 Stoppen</button>
+  </div>
+  <div id="scores-player-wait" style="display:none;text-align:center;padding:1rem 0;color:#888;font-size:13px">⏳ Wachten op de host...</div>
 </div>
 
 <!-- END -->
 <div id="s-end" class="screen">
-  <h2>🏆 Eindstand</h2>
-  <div id="end-list" style="margin-bottom:20px"></div>
+  <h1>Quiz afgelopen! 🎉</h1>
+  <p class="sub">Eindstand</p>
+  <div id="end-list" style="margin-bottom:1.25rem"></div>
   <div id="end-history" style="display:none">
-    <hr class="divider">
-    <h3>Jouw antwoorden</h3>
+    <h2 style="font-size:15px;margin-bottom:.75rem">📋 Jouw antwoorden</h2>
     <div id="end-history-list"></div>
   </div>
-  <button class="btn btn-outline" style="margin-top:20px" onclick="resetAll()">↩ Nieuwe quiz</button>
+  <button class="btn btn-p btn-full" style="margin-top:1rem" onclick="location.reload()">🔄 Nieuwe quiz</button>
 </div>
 
-<script src="/socket.io/socket.io.js"></script>
+</div>
+
+
 <script>
-const socket = io();
-let role = null;
-let roomCode = null;
-let timerInterval = null;
-let currentTimeLeft = 0;
-let currentTimeLimit = 15;
-const MEDALS = ['🥇','🥈','🥉'];
+const socket=io();
+const SH=['A','B','C','D'];
+const MEDALS=['🥇','🥈','🥉'];
+let role=null;
+let maxScore=0;
+let currentTimeLeft=0, currentTimeLimit=15, timerInterval=null;
+let currentMusicAudio=null;
 
-// ── Screen ─────────────────────────────────────────────────────────────────
-function show(id) {
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
+// ── Timer ────────────────────────────────────────────────────────────────
+function startClientTimer(total){
+  clearInterval(timerInterval);
+  currentTimeLimit=total; currentTimeLeft=total;
+  const hEl=document.getElementById('hq-timer');
+  const pEl=document.getElementById('pq-timer');
+  const hProg=document.getElementById('hq-prog');
+  const pProg=document.getElementById('pq-prog');
+  timerInterval=setInterval(()=>{
+    currentTimeLeft=Math.max(0,currentTimeLeft-1);
+    const pct=Math.round(currentTimeLeft/currentTimeLimit*100);
+    if(hEl){hEl.textContent=currentTimeLeft;hEl.classList.toggle('urgent',currentTimeLeft<=5);}
+    if(pEl){pEl.textContent=currentTimeLeft;pEl.classList.toggle('urgent',currentTimeLeft<=5);}
+    if(hProg)hProg.style.width=pct+'%';
+    if(pProg)pProg.style.width=pct+'%';
+    if(currentTimeLeft<=0)clearInterval(timerInterval);
+  },1000);
+}
+function stopClientTimer(){clearInterval(timerInterval);}
+
+// ── Screen ───────────────────────────────────────────────────────────────
+function show(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');}
+function homeTab(t){
+  document.getElementById('home-host').style.display=t==='host'?'block':'none';
+  document.getElementById('home-join').style.display=t==='join'?'block':'none';
+  document.getElementById('t-host').classList.toggle('active',t==='host');
+  document.getElementById('t-join').classList.toggle('active',t==='join');
 }
 
-// ── EDITOR ─────────────────────────────────────────────────────────────────
-let questions = [];
-
-function addQuestion(type) {
-  const idx = questions.length;
-  const q = { type, text: '', image: null, audio: null, audioType: 'upload' };
-  if (type === 'multiple') {
-    q.answers = ['','','',''];
-    q.correctAnswer = 0;
-    q.timeLimit = 15;
-  } else if (type === 'open') {
-    q.correctAnswer = '';
-    q.timeLimit = 30;
-  } else if (type === 'music') {
-    q.correctArtist = '';
-    q.correctTitle = '';
-    q.timeLimit = 45;
-  }
-  questions.push(q);
-  renderEditor();
-  setTimeout(() => toggleExpand(idx), 40);
+// ── QR Code (via api.qrserver.com) ───────────────────────────────────────
+function generateQR(code){
+  const url=`${location.origin}/join/${code}`;
+  const qrUrl=`https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(url)}&color=3C3489&bgcolor=ffffff&margin=4`;
+  const wrap=document.getElementById('qr-wrap');
+  if(wrap) wrap.innerHTML=`<img src="${qrUrl}" width="140" height="140" style="border-radius:8px" alt="QR code"><p class="qr-label">Scan om mee te doen</p>`;
+  const urlDisplay=document.getElementById('join-url-display');
+  if(urlDisplay) urlDisplay.innerHTML=`<a href="${url}" style="color:#534AB7;font-size:11px" target="_blank">${url}</a>`;
 }
 
-function renderEditor() {
-  const wrap = document.getElementById('e-questions');
-  wrap.innerHTML = '';
-  questions.forEach((q, i) => {
-    const typeLabel = q.type === 'multiple' ? '🔵 MC' : q.type === 'open' ? '🟡 Open' : '🟣 Muziek';
-    const el = document.createElement('div');
-    el.className = 'q-item';
-    el.innerHTML = `
-      <div class="q-item-head" onclick="toggleExpand(${i})">
-        <div class="q-item-num">${i+1}</div>
-        <div style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${q.text || '<span style="color:var(--muted)">Nieuwe vraag</span>'}</div>
-        <span class="tag ${q.type==='multiple'?'tag-gray':q.type==='open'?'tag-orange':'tag-purple'}">${typeLabel}</span>
-        <span style="color:var(--muted);margin-left:4px">▾</span>
+// ── Editor ───────────────────────────────────────────────────────────────
+let questions=[
+  {type:'multiple',text:'Wat is de hoofdstad van Nederland?',answers:['Amsterdam','Rotterdam','Den Haag','Utrecht'],correct:0,timeLimit:15,image:null},
+  {type:'open',text:'Noem de uitvinder van de gloeilamp.',correctAnswers:['Thomas Edison','Edison'],timeLimit:30,image:null}
+];
+
+function renderEditor(){
+  document.getElementById('q-editor').innerHTML=questions.map((q,i)=>`
+    <div class="q-block">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <span style="font-size:12px;color:#888">Vraag ${i+1} — <strong>${q.type==='open'?'Open vraag':q.type==='music'?'🎵 Muziekvraag':'Meerkeuze'}</strong></span>
+        <button class="btn btn-sm" onclick="removeQ(${i})" style="background:#fff;padding:3px 8px">✕</button>
       </div>
-      <div class="q-expand" id="q-expand-${i}">${buildExpandHtml(q,i)}</div>`;
-    wrap.appendChild(el);
-  });
+      ${q.type==='music'?buildMusicEditor(q,i):buildRegularEditor(q,i)}
+    </div>`).join('');
 }
 
-function buildExpandHtml(q, i) {
-  // Answer section
-  let answersHtml = '';
-  if (q.type === 'multiple') {
-    answersHtml = `<div><label>Antwoordopties (klik radio = correct)</label>`
-      + q.answers.map((a,j) => `<div class="row" style="margin-bottom:6px">
-          <input type="radio" name="correct-${i}" value="${j}" ${q.correctAnswer===j?'checked':''} onchange="setCorrect(${i},${j})">
-          <input type="text" value="${esc(a)}" placeholder="Optie ${j+1}" oninput="setAnswer(${i},${j},this.value)" style="flex:1">
-        </div>`).join('') + `</div>`;
-  } else if (q.type === 'open') {
-    answersHtml = `<div><label>Correct antwoord</label>
-      <input type="text" value="${esc(q.correctAnswer||'')}" placeholder="Correct antwoord..." oninput="setField(${i},'correctAnswer',this.value)"></div>`;
-  } else if (q.type === 'music') {
-    answersHtml = `<div class="col" style="gap:8px">
-      <div><label>🎤 Correct artiest</label>
-        <input type="text" value="${esc(q.correctArtist||'')}" placeholder="Artiestennaam..." oninput="setField(${i},'correctArtist',this.value)"></div>
-      <div><label>🎵 Correcte songtitel</label>
-        <input type="text" value="${esc(q.correctTitle||'')}" placeholder="Songtitel..." oninput="setField(${i},'correctTitle',this.value)"></div>
-      <p style="color:var(--muted);font-size:.8rem">Spelers moeten <em>beide</em> velden invullen. Je beoordeelt ze apart in het reviewpaneel.</p>
-    </div>`;
-  }
-
-  return `<div class="col" style="gap:10px">
-    <div class="row" style="gap:10px;flex-wrap:wrap">
-      <div style="flex:2;min-width:200px"><label>Vraagtekst</label>
-        <input type="text" value="${esc(q.text||'')}" placeholder="Vraag..." oninput="setField(${i},'text',this.value)"></div>
-      <div><label>Tijdslimiet (s)</label>
-        <input type="number" value="${q.timeLimit}" min="5" max="300" style="width:80px" onchange="setField(${i},'timeLimit',parseInt(this.value)||15)"></div>
-    </div>
-    ${answersHtml}
-    <hr class="divider">
-    ${buildImageHtml(q,i)}
-    <hr class="divider">
-    ${buildAudioHtml(q,i)}
-    <div class="row" style="justify-content:flex-end">
-      <button class="btn btn-red btn-sm" onclick="removeQuestion(${i})">🗑 Verwijder</button>
-    </div>
-  </div>`;
+function buildRegularEditor(q,i){
+  return `
+    <div class="field-label">Vraagtekst</div>
+    <input type="text" value="${esc(q.text)}" oninput="questions[${i}].text=this.value" placeholder="Vraag..."/>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div>
+        <div class="field-label">Tijdslimiet (seconden)</div>
+        <input type="number" value="${q.timeLimit||15}" min="5" max="300" oninput="questions[${i}].timeLimit=parseInt(this.value)||15" style="margin-bottom:0"/>
+      </div>
+    ${q.type==='multiple'?`
+      <div class="field-label">Antwoorden — selecteer het goede antwoord</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:2px">
+        ${q.answers.map((a,j)=>`
+          <div style="display:flex;align-items:center;gap:5px">
+            <span style="width:16px;height:16px;border-radius:50%;background:${['#185FA5','#A32D2D','#3B6D11','#854F0B'][j]};display:inline-flex;align-items:center;justify-content:center;font-size:9px;color:#fff;flex-shrink:0">${SH[j]}</span>
+            <input type="text" value="${esc(a)}" oninput="questions[${i}].answers[${j}]=this.value" style="margin:0;font-size:12px;padding:5px 8px;flex:1"/>
+            <input type="radio" name="c${i}" ${q.correct===j?'checked':''} onchange="questions[${i}].correct=${j}" title="Goed antwoord"/>
+          </div>`).join('')}
+      </div>`:`
+      <div class="field-label">Goede antwoorden (kommagescheiden)</div>
+      <input type="text" value="${esc((q.correctAnswers||[]).join(', '))}" oninput="questions[${i}].correctAnswers=this.value.split(',').map(s=>s.trim()).filter(Boolean)" placeholder="Antwoord 1, Antwoord 2..."/>`}
+    ${buildImageSection(q,i)}`;
 }
 
-function buildImageHtml(q, i) {
-  const previewHtml = q.image
-    ? `<div><img src="${q.image}" class="img-preview"><br><button class="btn btn-red btn-sm" style="margin-top:4px" onclick="removeImage(${i})">✕ Verwijder afbeelding</button></div>`
-    : '';
-  return `<div>
-    <label>🖼 Afbeelding (optioneel)</label>
-    <div class="row" style="gap:6px;margin-bottom:8px">
-      <button class="btn btn-outline btn-sm" onclick="triggerImgUpload(${i})">📁 Upload</button>
-      <button class="btn btn-outline btn-sm" onclick="togglePexels(${i})">🔍 Pexels stockfoto</button>
-      <input type="text" placeholder="Of plak een afbeeldings-URL…" style="flex:1" oninput="setImageUrl(${i},this.value)">
+function buildMusicEditor(q,i){
+  const hasAudio=!!q.audio;
+  return `
+    <div style="background:#faf5ff;border-radius:10px;padding:10px;margin-bottom:8px;border:1.5px solid #e9d5ff">
+      <div class="field-label" style="color:#7e22ce;font-weight:600">🎧 Zoek nummer op Deezer <span style="color:#A32D2D">*</span></div>
+      <div style="display:flex;gap:6px;margin-top:4px">
+        <input type="text" id="dz-q-${i}" placeholder="Zoek artiest of nummer…" style="flex:1;margin:0" onkeydown="if(event.key==='Enter')searchDeezer(${i})"/>
+        <button class="btn btn-sm btn-music" onclick="searchDeezer(${i})">Zoeken</button>
+      </div>
+      <div id="dz-results-${i}" style="margin-top:8px"></div>
+      ${hasAudio
+        ?`<div style="display:flex;align-items:center;gap:8px;margin-top:6px;background:#f3e8ff;border-radius:8px;padding:7px 10px">
+            <span style="font-size:13px;color:#7e22ce">✅ <strong>${esc(q.audio.label||'')}</strong></span>
+            <button class="btn btn-sm" style="background:#fff;color:#A32D2D;border:1px solid #F09595;margin-left:auto" onclick="questions[${i}].audio=null;renderEditor()">✕ Wijzigen</button>
+          </div>`
+        :`<p style="font-size:11px;color:#A32D2D;margin-top:4px">⚠ Kies eerst een nummer — verplicht bij muziekvragen.</p>`}
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div>
+        <div class="field-label">🎤 Artiest (automatisch)</div>
+        <input type="text" value="${esc(q.correctArtist||'')}" oninput="questions[${i}].correctArtist=this.value" placeholder="Artiestennaam..."/>
+      </div>
+      <div>
+        <div class="field-label">🎵 Songtitel (automatisch)</div>
+        <input type="text" value="${esc(q.correctTitle||'')}" oninput="questions[${i}].correctTitle=this.value" placeholder="Songtitel..."/>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div>
+        <div class="field-label">Vraagtekst (optioneel)</div>
+        <input type="text" value="${esc(q.text||'')}" oninput="questions[${i}].text=this.value" placeholder="Raad het nummer! 🎵" style="margin-bottom:0"/>
+      </div>
+      <div>
+        <div class="field-label">Tijdslimiet (seconden)</div>
+        <input type="number" value="${q.timeLimit||45}" min="5" max="300" oninput="questions[${i}].timeLimit=parseInt(this.value)||45" style="margin-bottom:0"/>
+      </div>
+    </div>
+    ${buildImageSection(q,i)}`;
+}
+
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');}
+
+function buildImageSection(q,i){
+  const hasImg=!!q.image;
+  return `<div style="border-top:1px solid #f0eff8;margin-top:8px;padding-top:8px">
+    <div class="field-label">🖼 Afbeelding (optioneel)</div>
+    <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">
+      <button class="btn btn-sec btn-sm" onclick="triggerImgUpload(${i})">📁 Upload</button>
+      <button class="btn btn-sec btn-sm" onclick="togglePexels(${i})">🔍 Pexels</button>
+      <input type="text" placeholder="Of plak afbeeldings-URL…" style="flex:1;min-width:120px;margin:0;font-size:12px;padding:5px 8px" oninput="setImgUrl(${i},this.value)">
     </div>
     <input type="file" id="img-file-${i}" accept="image/*" style="display:none" onchange="handleImgUpload(${i},this)">
-    ${previewHtml}
-    <div id="pexels-wrap-${i}" style="display:none">
-      <div class="row" style="gap:6px;margin-top:6px">
-        <input type="text" id="pexels-q-${i}" placeholder="Zoekterm (Engels)…" style="flex:1"
-          onkeydown="if(event.key==='Enter')searchPexels(${i})">
-        <button class="btn btn-outline btn-sm" onclick="searchPexels(${i})">Zoeken</button>
+    ${hasImg?`<div class="img-preview-wrap"><img src="${q.image}" alt=""><button class="btn btn-sm" style="background:#fff;color:#A32D2D;border:1px solid #F09595;margin-top:4px" onclick="questions[${i}].image=null;renderEditor()">✕ Verwijder</button></div>`:''}
+    <div id="pexels-wrap-${i}" style="display:none;margin-top:6px">
+      <div style="display:flex;gap:6px">
+        <input type="text" id="pexels-q-${i}" placeholder="Zoekterm (Engels)…" style="flex:1;margin:0;font-size:12px;padding:5px 8px" onkeydown="if(event.key==='Enter')searchPexels(${i})">
+        <button class="btn btn-sec btn-sm" onclick="searchPexels(${i})">Zoeken</button>
       </div>
       <div id="pexels-results-${i}" class="pexels-grid"></div>
-      <p class="pexels-credit">Foto's via <a href="https://pexels.com" target="_blank" style="color:var(--accent)">Pexels</a></p>
+      <p class="pexels-credit">Foto's via <a href="https://pexels.com" target="_blank" style="color:#534AB7">Pexels</a></p>
     </div>
   </div>`;
 }
 
-function buildAudioHtml(q, i) {
-  const t = q.audioType || 'upload';
-  const hasAudio = !!q.audio;
-  return `<div>
-    <label>🎵 Audio (optioneel)</label>
-    <div class="row" style="gap:6px;margin-bottom:8px">
-      <button class="btn btn-sm ${t==='upload'?'btn-primary':'btn-outline'}" onclick="setAudioType(${i},'upload')">📁 Upload MP3</button>
-      <button class="btn btn-sm ${t==='soundcloud'?'btn-primary':'btn-outline'}" onclick="setAudioType(${i},'soundcloud')">☁️ SoundCloud</button>
-      <button class="btn btn-sm ${t==='url'?'btn-primary':'btn-outline'}" onclick="setAudioType(${i},'url')">🔗 Audio-URL</button>
-      <button class="btn btn-sm ${t==='spotify'?'btn-primary':'btn-outline'}" style="${t!=='spotify'?'border-color:#1db954;color:#1db954':''}" onclick="setAudioType(${i},'spotify')">🎧 Spotify</button>
-    </div>
-    <input type="file" id="audio-file-${i}" accept="audio/*" style="display:none" onchange="handleAudioUpload(${i},this)">
-    <div id="audio-input-${i}">
-      ${t==='upload' ? `<button class="btn btn-outline btn-sm" onclick="document.getElementById('audio-file-${i}').click()">📁 Kies MP3-bestand</button>` : ''}
-      ${t==='soundcloud' ? `<input type="text" placeholder="https://soundcloud.com/artiest/nummer" value="${esc(q.audio?.url||'')}" oninput="setSCUrl(${i},this.value)">
-        <p style="color:var(--muted);font-size:.78rem;margin-top:4px">Nummer moet publiek staan op SoundCloud</p>` : ''}
-      ${t==='url' ? `<input type="text" placeholder="Directe MP3-URL (https://…/nummer.mp3)" value="${esc(q.audio?.url||'')}" oninput="setAudioDirectUrl(${i},this.value)">` : ''}
-      ${t==='spotify' ? `
-        <div class="col" style="gap:6px">
-          <div class="row" style="gap:6px">
-            <input type="text" id="spotify-q-${i}" placeholder="Songtitel…" style="flex:1"
-              onkeydown="if(event.key==='Enter')searchSpotify(${i})">
-            <input type="text" id="spotify-artist-${i}" placeholder="Artiest (optioneel)" style="flex:1"
-              onkeydown="if(event.key==='Enter')searchSpotify(${i})">
-            <button class="btn btn-sm" style="background:#1db954;color:#000;font-weight:700" onclick="searchSpotify(${i})">Zoeken</button>
-          </div>
-          <p style="color:var(--muted);font-size:.78rem">Tip: vul ook de artiest in voor betere resultaten. Tracks zonder preview zijn grijs.</p>
-        </div>
-        <div id="spotify-results-${i}" style="margin-top:8px"></div>
-      ` : ''}
-    </div>
-    ${hasAudio ? `<p style="color:var(--green);font-size:.83rem;margin-top:6px">✅ Audio ingesteld</p>
-      <button class="btn btn-red btn-sm" style="margin-top:4px" onclick="removeAudio(${i})">✕ Verwijder audio</button>` : ''}
-  </div>`;
-}
-
-function esc(s){ return String(s).replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
-function toggleExpand(i){ document.getElementById(`q-expand-${i}`)?.classList.toggle('open'); }
-function reopenExpand(i){ setTimeout(()=>{ document.getElementById(`q-expand-${i}`)?.classList.add('open'); },40); }
-
-function setField(i, key, val){ questions[i][key]=val; }
-function setAnswer(i,j,v){ questions[i].answers[j]=v; }
-function setCorrect(i,j){ questions[i].correctAnswer=j; }
-function removeQuestion(i){ questions.splice(i,1); renderEditor(); }
-
-// Image
-function triggerImgUpload(i){ document.getElementById(`img-file-${i}`).click(); }
+function triggerImgUpload(i){document.getElementById(`img-file-${i}`).click();}
 function handleImgUpload(i,input){
-  const f=input.files[0]; if(!f)return;
+  const f=input.files[0];if(!f)return;
   const r=new FileReader();
-  r.onload=e=>{ questions[i].image=e.target.result; renderEditor(); reopenExpand(i); };
+  r.onload=e=>{questions[i].image=e.target.result;renderEditor();};
   r.readAsDataURL(f);
 }
-function setImageUrl(i,v){ if(v.startsWith('http')){ questions[i].image=v; } }
-function removeImage(i){ questions[i].image=null; renderEditor(); reopenExpand(i); }
+function setImgUrl(i,v){if(v.startsWith('http'))questions[i].image=v;}
 function togglePexels(i){
   const w=document.getElementById(`pexels-wrap-${i}`);
-  if(w) w.style.display = w.style.display==='none'?'block':'none';
+  if(w)w.style.display=w.style.display==='none'?'block':'none';
 }
 async function searchPexels(i){
-  const q=document.getElementById(`pexels-q-${i}`).value.trim();
-  if(!q) return;
+  const q=document.getElementById(`pexels-q-${i}`)?.value.trim();
+  if(!q)return;
   const el=document.getElementById(`pexels-results-${i}`);
-  el.innerHTML='<span style="color:var(--muted);font-size:.85rem">Zoeken…</span>';
-  try {
+  el.innerHTML='<span style="font-size:11px;color:#888;grid-column:1/-1">Zoeken…</span>';
+  try{
     const res=await fetch(`/api/pexels?q=${encodeURIComponent(q)}`);
     const data=await res.json();
-    if(data.error==='no_key'){
-      el.innerHTML='<p style="color:var(--red);font-size:.82rem">Geen Pexels API key ingesteld in server.js. Zie README.</p>';
-      return;
-    }
-    if(!data.photos?.length){
-      el.innerHTML='<p style="color:var(--muted);font-size:.82rem">Geen resultaten gevonden.</p>';
-      return;
-    }
-    el.innerHTML=data.photos.map(p=>
-      `<img src="${p.thumb}" loading="lazy" title="${esc(p.alt)} – Foto: ${esc(p.photographer)}"
-         onclick="pickPexels(${i},'${p.full}',this)">`
-    ).join('');
-  } catch(e){
-    el.innerHTML='<p style="color:var(--red);font-size:.82rem">Fout bij ophalen afbeeldingen.</p>';
-  }
+    if(data.error==='no_key'){el.innerHTML='<span style="font-size:11px;color:#A32D2D;grid-column:1/-1">Geen Pexels API key ingesteld.</span>';return;}
+    if(!data.photos?.length){el.innerHTML='<span style="font-size:11px;color:#888;grid-column:1/-1">Geen resultaten.</span>';return;}
+    el.innerHTML=data.photos.map(p=>`<img src="${p.thumb}" loading="lazy" title="${esc(p.alt)} — ${esc(p.photographer)}" onclick="pickPexels(${i},'${p.full}',this)">`).join('');
+  }catch(e){el.innerHTML=`<span style="font-size:11px;color:#A32D2D;grid-column:1/-1">Fout: ${e.message}</span>`;}
 }
 function pickPexels(i,url,img){
   questions[i].image=url;
-  document.querySelectorAll(`#pexels-results-${i} img`).forEach(el=>el.classList.remove('chosen'));
+  img.closest('.pexels-grid').querySelectorAll('img').forEach(el=>el.classList.remove('chosen'));
   img.classList.add('chosen');
+  renderEditor();
 }
-
-// Audio
-function setAudioType(i,t){ questions[i].audioType=t; questions[i].audio=null; renderEditor(); reopenExpand(i); }
-function handleAudioUpload(i,input){
-  const f=input.files[0]; if(!f)return;
-  const r=new FileReader();
-  r.onload=e=>{ questions[i].audio={type:'base64',data:e.target.result,name:f.name}; renderEditor(); reopenExpand(i); };
-  r.readAsDataURL(f);
+function addQ(type){
+  if(type==='multiple') questions.push({type:'multiple',text:'Nieuwe vraag',answers:['A','B','C','D'],correct:0,timeLimit:15,image:null});
+  else if(type==='open') questions.push({type:'open',text:'Nieuwe open vraag',correctAnswers:[''],timeLimit:30,image:null});
+  else questions.push({type:'music',text:'',correctArtist:'',correctTitle:'',timeLimit:45,audio:null,image:null});
+  renderEditor();
 }
-function setSCUrl(i,v){ if(v.includes('soundcloud.com')) questions[i].audio={type:'soundcloud',url:v}; }
-function setAudioDirectUrl(i,v){ if(v.startsWith('http')) questions[i].audio={type:'url',url:v}; }
+function removeQ(i){if(questions.length>1){questions.splice(i,1);renderEditor();}}
 
-async function searchSpotify(i) {
-  const q = document.getElementById(`spotify-q-${i}`)?.value.trim();
-  const artist = document.getElementById(`spotify-artist-${i}`)?.value.trim() || '';
-  if (!q) return;
-  const el = document.getElementById(`spotify-results-${i}`);
-  el.innerHTML = '<span style="color:var(--muted);font-size:.85rem">Zoeken op Spotify…</span>';
-  try {
-    const url = `/api/spotify-search?q=${encodeURIComponent(q)}${artist ? '&artist='+encodeURIComponent(artist) : ''}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    if (data.error === 'no_key') {
-      el.innerHTML = '<p style="color:var(--red);font-size:.82rem">Geen Spotify API keys ingesteld. Voeg SPOTIFY_CLIENT_ID en SPOTIFY_CLIENT_SECRET toe als environment variables.</p>';
-      return;
-    }
-    if (!data.tracks?.length) {
-      el.innerHTML = '<p style="color:var(--muted);font-size:.82rem">Geen resultaten gevonden. Probeer een andere zoekterm.</p>';
-      return;
-    }
-    el.innerHTML = data.tracks.map((t, idx) => {
-      const hasPreview = !!t.previewUrl;
-      return `<div class="spotify-track${hasPreview ? '' : ' no-preview'}" id="spotify-track-${i}-${idx}"
-          onclick="${hasPreview ? `pickSpotify(${i},${idx})` : ''}"
-          style="${!hasPreview ? 'opacity:.45;cursor:not-allowed' : ''}">
-        <div class="spotify-track-info">
-          <div class="spotify-track-name">${esc(t.name)}</div>
-          <div class="spotify-track-sub">${esc(t.albumName||'')} · ${(t.releaseDate||'').slice(0,4)}${!hasPreview ? ' · <em>geen preview</em>' : ''}</div>
+// ── Deezer search ─────────────────────────────────────────────────────────
+window._deezerResults={};
+async function searchDeezer(i){
+  const q=document.getElementById(`dz-q-${i}`)?.value.trim();
+  if(!q)return;
+  const el=document.getElementById(`dz-results-${i}`);
+  el.innerHTML='<span style="font-size:12px;color:#888">Zoeken…</span>';
+  try{
+    const res=await fetch(`/api/deezer-search?q=${encodeURIComponent(q)}`);
+    const data=await res.json();
+    if(data.error){el.innerHTML=`<p style="font-size:12px;color:#A32D2D">Fout: ${data.error}</p>`;return;}
+    if(!data.tracks?.length){el.innerHTML='<p style="font-size:12px;color:#888">Geen resultaten.</p>';return;}
+    _deezerResults[i]=data.tracks;
+    el.innerHTML=data.tracks.map((t,idx)=>`
+      <div class="deezer-track" id="dz-t-${i}-${idx}" onclick="pickDeezer(${i},${idx})">
+        ${t.cover?`<img class="deezer-cover" src="${t.cover}" alt="">`:''}
+        <div class="deezer-info">
+          <div class="deezer-title">${esc(t.title)}</div>
+          <div class="deezer-sub">${esc(t.artist)} · ${esc(t.album)}</div>
         </div>
-        <div class="spotify-track-preview">
-          ${hasPreview
-            ? `<audio src="${t.previewUrl}" style="height:28px;width:160px" controls onclick="event.stopPropagation()"></audio>`
-            : `<span style="font-size:.75rem;color:var(--muted)">Niet beschikbaar</span>`}
-        </div>
-      </div>`;
-    }).join('');
-    window._spotifyResults = window._spotifyResults || {};
-    window._spotifyResults[i] = data.tracks;
-  } catch(e) {
-    el.innerHTML = `<p style="color:var(--red);font-size:.82rem">Fout: ${e.message}</p>`;
-  }
+        <audio src="${t.previewUrl}" style="height:24px;width:130px" controls onclick="event.stopPropagation()"></audio>
+      </div>`).join('');
+  }catch(e){el.innerHTML=`<p style="font-size:12px;color:#A32D2D">Fout: ${e.message}</p>`;}
+}
+function pickDeezer(i,idx){
+  const t=_deezerResults[i]?.[idx];
+  if(!t)return;
+  questions[i].audio={type:'url',url:t.previewUrl,label:`${t.title} - ${t.artist}`};
+  questions[i].correctArtist=t.artist;
+  questions[i].correctTitle=t.title;
+  if(!questions[i].text)questions[i].text='Raad het nummer! 🎵';
+  renderEditor();
+  // Scroll back to keep open
+  setTimeout(()=>document.getElementById(`dz-results-${i}`)?.scrollIntoView({behavior:'smooth',block:'nearest'}),60);
 }
 
-function pickSpotify(i, idx) {
-  const tracks = window._spotifyResults?.[i];
-  if (!tracks || !tracks[idx]) return;
-  const t = tracks[idx];
-  questions[i].audio = { type: 'url', url: t.previewUrl, label: t.name };
-  // Visual feedback
-  document.querySelectorAll(`[id^="spotify-track-${i}-"]`).forEach(el => el.classList.remove('chosen'));
-  document.getElementById(`spotify-track-${i}-${idx}`)?.classList.add('chosen');
-  // Auto-fill correctArtist / correctTitle for music questions if empty
-  if (questions[i].type === 'music') {
-    const parts = t.name.split(' - ');
-    if (parts.length >= 2 && !questions[i].correctTitle) {
-      questions[i].correctTitle = parts.slice(1).join(' - ');
-    }
-    if (!questions[i].correctArtist && parts.length >= 2) {
-      questions[i].correctArtist = parts[0];
-    }
-  }
-  // Show confirmation
-  const el = document.getElementById(`spotify-results-${i}`);
-  const conf = document.createElement('p');
-  conf.style.cssText = 'color:#1db954;font-size:.83rem;margin-top:6px';
-  conf.textContent = `✅ Gekozen: ${t.name}`;
-  // Remove old confirmation if any
-  el.parentNode.querySelectorAll('.spotify-confirm').forEach(e=>e.remove());
-  conf.className = 'spotify-confirm';
-  el.parentNode.appendChild(conf);
-}
-function removeAudio(i){ questions[i].audio=null; renderEditor(); reopenExpand(i); }
-
-// ── Host actions ───────────────────────────────────────────────────────────
-function hostCreate(){
-  if(questions.length===0) return alert('Voeg eerst minimaal één vraag toe.');
+// ── Lobby ─────────────────────────────────────────────────────────────────
+function createLobby(){
   for(const q of questions){
-    if(!q.text.trim()) return alert('Elke vraag moet een tekst hebben.');
-    if(q.type==='multiple'&&q.answers.some(a=>!a.trim())) return alert('Vul alle antwoordopties in.');
-    if(q.type==='open'&&!q.correctAnswer?.trim()) return alert('Vul het juiste antwoord in bij open vragen.');
-    if(q.type==='music'&&(!q.correctArtist?.trim()||!q.correctTitle?.trim())) return alert('Vul artiest én songtitel in bij muziekvragen.');
+    if(q.type==='music'&&!q.audio) return alert('Kies een Deezer-nummer bij elke muziekvraag.');
+    if(q.type==='music'&&(!q.correctArtist||!q.correctTitle)) return alert('Artiest en titel zijn verplicht bij muziekvragen.');
   }
   role='host';
-  socket.emit('host:create',{
-    quiz:questions,
-    scoreboardMode:document.getElementById('e-scoreboardMode').value,
-    showFeedback:document.getElementById('e-showFeedback').value==='1'
-  });
+  const scoreboardMode=document.getElementById('setting-scoreboard').value;
+  socket.emit('host:create',{questions,settings:{scoreboardMode}});
 }
-function hostStart(){ socket.emit('host:start',{code:roomCode}); }
-function hostNext(){
-  document.getElementById('hq-next').style.display='none';
-  document.getElementById('hq-scoreboard-decision').style.display='none';
-  document.getElementById('sb-next-wrap').style.display='none';
-  socket.emit('host:next',{code:roomCode});
-}
-function hostEndQuestion(){ socket.emit('host:end_question',{code:roomCode}); }
-function hostReviewDone(){ socket.emit('host:review_done',{code:roomCode}); }
-function hostShowScoreboard(){ document.getElementById('hq-scoreboard-decision').style.display='none'; socket.emit('host:show_scoreboard',{code:roomCode}); }
-function hostSkipScoreboard(){ document.getElementById('hq-scoreboard-decision').style.display='none'; socket.emit('host:skip_scoreboard',{code:roomCode}); }
-function hostGrade(playerId,correct,pts){ socket.emit('host:grade',{code:roomCode,playerId,correct,pts}); }
-
-// ── Player actions ─────────────────────────────────────────────────────────
-function playerJoin(){
+function joinLobby(){
   const code=document.getElementById('join-code').value.trim();
   const name=document.getElementById('join-name').value.trim();
-  if(!code||!name) return alert('Vul code en naam in.');
-  role='player';
-  socket.emit('player:join',{code,name});
-}
-function playerAnswer(idx){
-  document.querySelectorAll('#pq-answers .ans-btn').forEach((b,i)=>{ b.disabled=true; if(i===idx)b.classList.add('selected'); });
-  socket.emit('player:answer',{code:roomCode,answer:idx,timeLeft:currentTimeLeft});
-}
-function playerSendOpen(){
-  const val=document.getElementById('pq-open-input').value.trim();
-  if(!val) return;
-  document.getElementById('pq-open-input').disabled=true;
-  document.querySelector('#pq-open-wrap .btn').disabled=true;
-  socket.emit('player:open_answer',{code:roomCode,answer:val});
-}
-function playerSendMusic(){
-  const artist=document.getElementById('pq-artist-input').value.trim();
-  const title=document.getElementById('pq-title-input').value.trim();
-  if(!artist&&!title) return alert('Vul minstens één veld in.');
-  document.getElementById('pq-artist-input').disabled=true;
-  document.getElementById('pq-title-input').disabled=true;
-  document.querySelector('#pq-music-wrap .btn').disabled=true;
-  socket.emit('player:music_answer',{code:roomCode,artist,title});
+  if(!code||!name)return alert('Vul code en naam in.');
+  role='player'; socket.emit('player:join',{code,name});
 }
 
-// ── Timer ──────────────────────────────────────────────────────────────────
-function startTimer(seconds,barId,numId){
-  clearInterval(timerInterval);
-  currentTimeLimit=seconds; currentTimeLeft=seconds;
-  const bar=document.getElementById(barId);
-  const num=document.getElementById(numId);
-  if(bar) bar.style.width='100%';
-  if(num) num.textContent=seconds;
-  timerInterval=setInterval(()=>{
-    currentTimeLeft--;
-    if(num) num.textContent=Math.max(0,currentTimeLeft);
-    if(bar) bar.style.width=Math.max(0,(currentTimeLeft/seconds)*100)+'%';
-    if(currentTimeLeft<=0) clearInterval(timerInterval);
-  },1000);
-}
-function stopTimer(){ clearInterval(timerInterval); }
-
-// ── Media (host-controlled) ────────────────────────────────────────────────
-let scWidget = null;   // SoundCloud Widget API instance
-let hostAudioEl = null; // <audio> element for host
-
-function renderImage(imgWrapId, image) {
-  document.getElementById(imgWrapId).innerHTML = image
-    ? `<img src="${image}" class="q-img" alt="Vraagafbeelding">` : '';
-}
-
-// HOST: render audio player with manual play/stop controls + "timer starten" button
-function renderHostAudio(audioWrapId, audio) {
-  scWidget = null;
-  hostAudioEl = null;
-  const aw = document.getElementById(audioWrapId);
-  if (!audio) { aw.innerHTML = ''; return; }
-
-  if (audio.type === 'soundcloud') {
-    const iframeId = 'sc-iframe-host';
-    aw.innerHTML = `
-      <div class="audio-host-wrap">
-        <iframe id="${iframeId}" class="sc-embed" height="140"
-          src="https://w.soundcloud.com/player/?url=${encodeURIComponent(audio.url)}&color=%236c63ff&auto_play=false&hide_related=true&show_comments=false"
-          allow="autoplay"></iframe>
-        <div class="audio-controls">
-          <button class="btn btn-green btn-sm" id="btn-play-sc" onclick="scPlay()">▶ Afspelen</button>
-          <button class="btn btn-red btn-sm" id="btn-stop-sc" onclick="scStop()" disabled>⏹ Stoppen</button>
-          <button class="btn btn-yellow" id="btn-music-done" onclick="hostMusicDone()" style="margin-left:auto">
-            ⏱ Stop muziek &amp; start timer
-          </button>
-        </div>
-        <p class="audio-hint">Speel de muziek af. Klik "Stop muziek &amp; start timer" als je klaar bent.</p>
-      </div>`;
-    // Load SC Widget API
-    if (window.SC) {
-      scWidget = SC.Widget(document.getElementById(iframeId));
-    } else {
-      const s = document.createElement('script');
-      s.src = 'https://w.soundcloud.com/player/api.js';
-      s.onload = () => { scWidget = SC.Widget(document.getElementById(iframeId)); };
-      document.head.appendChild(s);
-    }
+// ── URL routing: /join/:code ──────────────────────────────────────────────
+(()=>{
+  const path=location.pathname;
+  const joinMatch=path.match(/^\/join\/(\d{4})$/);
+  if(joinMatch){
+    // Player flow: show join screen with code pre-filled
+    document.getElementById('home-host').style.display='none';
+    document.getElementById('home-join').style.display='block';
+    document.getElementById('join-code').value=joinMatch[1];
+    document.getElementById('join-name').focus();
   } else {
-    const src = audio.type === 'base64' ? audio.data : audio.url;
-    aw.innerHTML = `
-      <div class="audio-host-wrap">
-        <audio id="host-audio-el" src="${src}"></audio>
-        <div class="audio-controls">
-          <button class="btn btn-green btn-sm" id="btn-play-a" onclick="hostAudioPlay()">▶ Afspelen</button>
-          <button class="btn btn-red btn-sm" id="btn-pause-a" onclick="hostAudioPause()" disabled>⏸ Pauzeren</button>
-          <input type="range" id="vol-slider" min="0" max="1" step="0.05" value="1"
-            oninput="hostAudioEl.volume=this.value" style="width:80px;accent-color:var(--accent)">
-          <button class="btn btn-yellow" id="btn-music-done" onclick="hostMusicDone()" style="margin-left:auto">
-            ⏱ Stop muziek &amp; start timer
-          </button>
-        </div>
-        <p class="audio-hint">Speel de muziek af via de speakers. Klik "Stop muziek &amp; start timer" als je klaar bent.</p>
-      </div>`;
-    hostAudioEl = document.getElementById('host-audio-el');
-    hostAudioEl.addEventListener('ended', () => {
-      document.getElementById('btn-play-a').disabled = false;
-      document.getElementById('btn-pause-a').disabled = true;
-    });
+    // Host flow: show editor directly
+    document.getElementById('home-host').style.display='block';
+    document.getElementById('home-join').style.display='none';
   }
+  // Legacy: ?code= param support
+  const legacyCode=new URLSearchParams(location.search).get('code');
+  if(legacyCode&&!joinMatch){
+    document.getElementById('home-host').style.display='none';
+    document.getElementById('home-join').style.display='block';
+    document.getElementById('join-code').value=legacyCode;
+  }
+})();
+
+function hostStart(){socket.emit('host:start');}
+function hostNext(){socket.emit('host:next');}
+function hostEndQuestion(){socket.emit('host:end_question');}
+function scoreboardDecision(show){socket.emit('host:scoreboard_decision',{show});}
+
+// ── Host music playback ───────────────────────────────────────────────────
+function hostPlayMusic(){
+  const audio=document.getElementById('hq-audio');
+  if(!audio)return;
+  audio.play();
+  document.getElementById('hq-play-btn').disabled=true;
+  document.getElementById('hq-play-btn').textContent='▶ Muziek speelt…';
+  socket.emit('host:music_started');
 }
 
-function hostAudioPlay() {
-  if (!hostAudioEl) return;
-  hostAudioEl.play();
-  document.getElementById('btn-play-a').disabled = true;
-  document.getElementById('btn-pause-a').disabled = false;
-}
-function hostAudioPause() {
-  if (!hostAudioEl) return;
-  hostAudioEl.pause();
-  document.getElementById('btn-play-a').disabled = false;
-  document.getElementById('btn-pause-a').disabled = true;
-}
-function scPlay() {
-  if (scWidget) scWidget.play();
-  document.getElementById('btn-play-sc').disabled = true;
-  document.getElementById('btn-stop-sc').disabled = false;
-}
-function scStop() {
-  if (scWidget) { scWidget.pause(); scWidget.seekTo(0); }
-  document.getElementById('btn-play-sc').disabled = false;
-  document.getElementById('btn-stop-sc').disabled = true;
-}
-function hostMusicDone() {
-  // Stop whatever is playing
-  if (hostAudioEl) { hostAudioEl.pause(); }
-  if (scWidget) { try { scWidget.pause(); } catch(e){} }
-  // Disable the button to prevent double-click
-  const btn = document.getElementById('btn-music-done');
-  if (btn) { btn.disabled = true; btn.textContent = '⏱ Timer gestart!'; }
-  socket.emit('host:music_done', { code: roomCode });
-}
-
-// PLAYER: never receives audio — just shows a waiting indicator
-function renderPlayerMusicWaiting(audioWrapId, hasAudio) {
-  const aw = document.getElementById(audioWrapId);
-  if (!hasAudio) { aw.innerHTML = ''; return; }
-  aw.innerHTML = `<div class="music-waiting">
-    <div class="music-note-anim">🎵</div>
-    <p>Luister naar de muziek…</p>
-  </div>`;
-}
-function hidePlayerMusicWaiting(audioWrapId) {
-  const aw = document.getElementById(audioWrapId);
-  if (aw) aw.innerHTML = '';
-}
-
-// ── Scoreboard ─────────────────────────────────────────────────────────────
-function renderScoreboard(scoreboard,isHost,isLast){
-  const maxScore=scoreboard.length>0?Math.max(...scoreboard.map(p=>p.score),1):1;
-  document.getElementById('sb-list').innerHTML=scoreboard.map((p,i)=>{
+// ── Scoreboard ────────────────────────────────────────────────────────────
+function renderScoreboard(sb,sub,showHostButtons,isLast,isDecision){
+  maxScore=sb.length>0?Math.max(...sb.map(p=>p.score),1):1;
+  document.getElementById('scores-sub').textContent=sub;
+  document.getElementById('scores-list').innerHTML=sb.map((p,i)=>{
     const pct=Math.max(2,Math.round(p.score/maxScore*100));
     return `<div class="score-row">
       <span class="s-rank">${MEDALS[i]||p.rank}</span>
@@ -769,240 +590,319 @@ function renderScoreboard(scoreboard,isHost,isLast){
       <span class="s-pts">${p.score.toLocaleString()} pt</span>
     </div>`;
   }).join('');
-  const nw=document.getElementById('sb-next-wrap');
-  if(isHost){
-    nw.style.display='block';
-    nw.innerHTML=isLast
-      ?`<button class="btn btn-green" onclick="hostNext()">🏆 Eindstand tonen</button>`
-      :`<button class="btn btn-green" onclick="hostNext()">Volgende vraag →</button>`;
-  } else { nw.style.display='none'; }
-  show('s-scoreboard');
+  document.getElementById('scores-decision').style.display=isDecision?'block':'none';
+  document.getElementById('scores-host-next').style.display=(showHostButtons&&!isDecision)?'block':'none';
+  document.getElementById('scores-player-wait').style.display=showHostButtons?'none':'block';
+  if(showHostButtons&&!isDecision) document.getElementById('next-q-btn').textContent=isLast?'Eindstand tonen 🏁':'Volgende vraag →';
+  show('s-scores');
 }
 
-// ── Socket events ──────────────────────────────────────────────────────────
+// ── Answers ───────────────────────────────────────────────────────────────
+function submitAnswer(i){
+  socket.emit('player:answer',{answerIndex:i});
+  document.querySelectorAll('#pq-answers .ans-btn').forEach(b=>b.disabled=true);
+}
+function submitOpen(){
+  const text=document.getElementById('pq-open-text').value.trim();
+  if(!text)return;
+  socket.emit('player:open_answer',{text});
+  document.getElementById('pq-submit-btn').disabled=true;
+  document.getElementById('pq-open-text').disabled=true;
+  document.getElementById('pq-fb').innerHTML=`<div class="fb fb-wait">✏️ Antwoord verstuurd: "<strong>${text}</strong>" — wachten op beoordeling...</div>`;
+}
+function submitMusic(){
+  const artist=document.getElementById('pq-artist').value.trim();
+  const title=document.getElementById('pq-title').value.trim();
+  if(!artist&&!title)return alert('Vul minimaal één veld in.');
+  socket.emit('player:music_answer',{artist,title});
+  document.getElementById('pq-music-submit').disabled=true;
+  document.getElementById('pq-artist').disabled=true;
+  document.getElementById('pq-title').disabled=true;
+  document.getElementById('pq-fb').innerHTML=`<div class="fb fb-wait">🎵 Antwoord verstuurd — wachten op beoordeling...</div>`;
+}
+
+// ── Review helpers ────────────────────────────────────────────────────────
+function fuzzyBadge(autoCorrect,score){
+  if(autoCorrect&&score>=0.99) return `<span class="fuzzy-badge fuzzy-auto">✓ exact</span>`;
+  if(autoCorrect&&score>=0.75) return `<span class="fuzzy-badge fuzzy-close">≈ bijna (${Math.round(score*100)}%)</span>`;
+  return `<span class="fuzzy-badge fuzzy-wrong">✗ geen match</span>`;
+}
+
+function upsertAnswerCard(playerId,name,text,autoCorrect,score){
+  const container=document.getElementById('hq-answer-cards');
+  const empty=container.querySelector('.review-empty');
+  if(empty)empty.remove();
+  const initials=name.slice(0,2).toUpperCase();
+  const html=`<div class="answer-card ${autoCorrect?'graded-ok':''}" id="ac-${playerId}">
+    <div class="answer-card-top">
+      <div class="player-avatar">${initials}</div>
+      <span class="player-name-sm">${name}</span>
+      ${fuzzyBadge(autoCorrect,score||0)}
+    </div>
+    <div class="answer-text">"${text}"</div>
+    <div class="grade-btns" id="acb-${playerId}">
+      <button class="btn btn-ok btn-sm" onclick="gradePlayer('${playerId}',true)">✓ Goed</button>
+      <button class="btn btn-no btn-sm" onclick="gradePlayer('${playerId}',false)">✗ Fout</button>
+    </div>
+  </div>`;
+  const existing=document.getElementById('ac-'+playerId);
+  if(existing)existing.outerHTML=html; else container.insertAdjacentHTML('beforeend',html);
+  document.getElementById('hq-review-count').textContent=`(${container.querySelectorAll('.answer-card').length} ontvangen)`;
+}
+
+function upsertMusicCard(playerId,name,artist,title,artistMatch,titleMatch){
+  const container=document.getElementById('hq-answer-cards');
+  const empty=container.querySelector('.review-empty');
+  if(empty)empty.remove();
+  const initials=name.slice(0,2).toUpperCase();
+  const aBadge=fuzzyBadge(artistMatch?.match,artistMatch?.score||0);
+  const tBadge=fuzzyBadge(titleMatch?.match,titleMatch?.score||0);
+  const suggestArtist=artistMatch?.match;
+  const suggestTitle=titleMatch?.match;
+  const html=`<div class="answer-card" id="ac-${playerId}">
+    <div class="answer-card-top">
+      <div class="player-avatar">${initials}</div>
+      <span class="player-name-sm">${name}</span>
+    </div>
+    <div class="answer-text">🎤 Artiest: <strong>${artist||'—'}</strong> ${aBadge}</div>
+    <div class="answer-text">🎵 Titel: <strong>${title||'—'}</strong> ${tBadge}</div>
+    <div class="grade-btns" id="acb-${playerId}">
+      <button class="btn btn-ok btn-sm" onclick="gradeMusicPlayer('${playerId}',true,true)">✅ Alles goed (500)</button>
+      <button class="btn btn-warn btn-sm" onclick="gradeMusicPlayer('${playerId}',${suggestArtist},${suggestTitle})">⚡ Auto (${(suggestArtist?250:0)+(suggestTitle?250:0)} pt)</button>
+      <button class="btn btn-no btn-sm" onclick="gradeMusicPlayer('${playerId}',false,false)">❌ Fout (0)</button>
+    </div>
+  </div>`;
+  const existing=document.getElementById('ac-'+playerId);
+  if(existing)existing.outerHTML=html; else container.insertAdjacentHTML('beforeend',html);
+  document.getElementById('hq-review-count').textContent=`(${container.querySelectorAll('.answer-card').length} ontvangen)`;
+}
+
+function gradePlayer(playerId,correct){socket.emit('host:grade',{playerId,correct});}
+function gradeMusicPlayer(playerId,artistCorrect,titleCorrect){
+  socket.emit('host:grade',{playerId,correct:artistCorrect||titleCorrect,artistCorrect,titleCorrect});
+}
+
+// ── Socket events ─────────────────────────────────────────────────────────
 socket.on('host:created',({code})=>{
-  roomCode=code;
   document.getElementById('lobby-code').textContent=code;
-  show('s-lobby');
+  document.getElementById('lobby-count').textContent='0';
+  generateQR(code);
+  show('s-host-lobby');
 });
-
+socket.on('player:joined',({name})=>{
+  document.getElementById('player-welcome').textContent=`Je doet mee als ${name}`;
+  show('s-player-lobby');
+});
 socket.on('lobby:update',({players})=>{
-  if(role==='host')
-    document.getElementById('lobby-players').innerHTML=players.map(n=>`<div class="chip">${n}</div>`).join('');
+  document.getElementById('lobby-count').textContent=players.length;
+  const chips=players.map(n=>`<div class="chip">👤 ${n}</div>`).join('');
+  document.getElementById('lobby-list').innerHTML=chips;
+  const pl=document.getElementById('player-lobby-list');
+  if(pl)pl.innerHTML=chips;
 });
 
-socket.on('player:joined',()=>{
-  roomCode=document.getElementById('join-code').value.trim();
-  show('s-waiting');
-});
-
-socket.on('question:start',({idx,total,text,type,timeLimit,answers,image,hasAudio,audio,correctArtist,correctTitle})=>{
-  stopTimer();
+socket.on('question:start',({index,total,text,type,answers,timeLeft,musicPhase,audio,image})=>{
+  stopClientTimer();
+  // Show image for both host and player
+  function showImg(prefix){
+    const wrap=document.getElementById(prefix+'-img');
+    const el=document.getElementById(prefix+'-img-el');
+    if(image&&wrap&&el){wrap.style.display='block';el.src=image;}
+    else if(wrap){wrap.style.display='none';}
+  }
+  const meta=`Vraag ${index+1} van ${total}`;
   if(role==='host'){
-    document.getElementById('hq-num').textContent=`Vraag ${idx+1}/${total}`;
-    document.getElementById('hq-text').textContent=text;
+    document.getElementById('hq-meta').textContent=meta;
+    document.getElementById('hq-timer').textContent=musicPhase?'–':timeLeft;
+    document.getElementById('hq-timer').classList.remove('urgent');
+    document.getElementById('hq-prog').style.width='100%';
+    document.getElementById('hq-progress').textContent=`0 / ? geantwoord`;
     document.getElementById('hq-next').style.display='none';
-    document.getElementById('hq-review-panel').style.display='none';
-    document.getElementById('hq-scoreboard-decision').style.display='none';
-    document.getElementById('hq-end-btn').style.display='inline-block';
+    document.getElementById('hq-review').style.display='none';
+    document.getElementById('hq-music-player').style.display='none';
+    showImg('hq');
 
-    const typeBadgeEl=document.getElementById('hq-type-badge');
-    const correctEl=document.getElementById('hq-correct-answer');
-    if(type==='multiple'){
-      typeBadgeEl.textContent='🔵 Meerkeuze'; typeBadgeEl.className='type-badge-multiple';
-      document.getElementById('hq-open-label').style.display='none';
-      document.getElementById('hq-answers').innerHTML=answers.map(a=>`<button class="ans-btn" disabled>${a}</button>`).join('');
-      correctEl.style.display='none';
-    } else if(type==='open'){
-      typeBadgeEl.textContent='🟡 Open vraag'; typeBadgeEl.className='type-badge-open';
+    if(type==='music'){
+      document.getElementById('hq-type-badge').innerHTML=`<span class="q-type-badge badge-music">🎵 Muziekvraag</span>`;
+      document.getElementById('hq-text').textContent=text;
       document.getElementById('hq-answers').innerHTML='';
-      document.getElementById('hq-open-label').style.display='block';
-      document.getElementById('hq-open-label').textContent='Spelers typen een antwoord…';
-      correctEl.style.display='block';
-      correctEl.textContent=`Correct antwoord: ${answers||''}`;
-    } else if(type==='music'){
-      typeBadgeEl.textContent='🟣 Muziekvraag'; typeBadgeEl.className='type-badge-music';
+      // Set up audio player
+      const audioEl=document.getElementById('hq-audio');
+      if(audio?.url){audioEl.src=audio.url;}
+      const playBtn=document.getElementById('hq-play-btn');
+      playBtn.disabled=false; playBtn.textContent='▶ Afspelen & timer starten';
+      document.getElementById('hq-music-player').style.display='block';
+      document.getElementById('hq-review').style.display='block';
+      document.getElementById('hq-review-hint').textContent='Beoordeel artiest en titel apart. Auto = fuzzy match resultaat.';
+      document.getElementById('hq-answer-cards').innerHTML='<div class="review-empty">Wachten op antwoorden...</div>';
+      document.getElementById('hq-review-count').textContent='';
+    } else if(type==='multiple'){
+      document.getElementById('hq-type-badge').innerHTML=`<span class="q-type-badge badge-multiple">🔘 Meerkeuze</span>`;
+      document.getElementById('hq-text').textContent=text;
+      document.getElementById('hq-answers').innerHTML=(answers||[]).map((a,i)=>`<div class="ans-btn a${i}" style="cursor:default">${SH[i]} ${a}</div>`).join('');
+      if(!musicPhase)startClientTimer(timeLeft);
+    } else {
+      document.getElementById('hq-type-badge').innerHTML=`<span class="q-type-badge badge-open">✏️ Open vraag</span>`;
+      document.getElementById('hq-text').textContent=text;
       document.getElementById('hq-answers').innerHTML='';
-      document.getElementById('hq-open-label').style.display='block';
-      document.getElementById('hq-open-label').textContent='Spelers vullen artiest + songtitel in nadat de timer start…';
-      correctEl.style.display='block';
-      correctEl.textContent=`Correct: ${correctArtist} / ${correctTitle}`;
+      document.getElementById('hq-review').style.display='block';
+      document.getElementById('hq-review-hint').textContent='Groen = automatisch goedgekeurd · Oranje = lijkt erop · Grijs = geen match.';
+      document.getElementById('hq-answer-cards').innerHTML='<div class="review-empty">Wachten op antwoorden...</div>';
+      document.getElementById('hq-review-count').textContent='';
+      if(!musicPhase)startClientTimer(timeLeft);
     }
-
-    renderImage('hq-img-wrap', image);
-    renderHostAudio('hq-audio-wrap', audio);
-
-    // If audio: timer bar is hidden until host:music_done triggers question:timer_start
-    const timerWrap = document.getElementById('hq-timer-wrap');
-    if(timerWrap) timerWrap.style.visibility = hasAudio ? 'hidden' : 'visible';
-
-    if(!hasAudio) startTimer(timeLimit,'hq-timer-bar','hq-timer-num');
-    show('s-hq');
+    show('s-host-q');
   } else {
-    document.getElementById('pq-num').textContent=`Vraag ${idx+1}/${total}`;
+    // Player
+    document.getElementById('pq-meta').textContent=meta;
+    document.getElementById('pq-timer').textContent=musicPhase?'–':timeLeft;
+    document.getElementById('pq-timer').classList.remove('urgent');
+    document.getElementById('pq-prog').style.width='100%';
     document.getElementById('pq-text').textContent=text;
     document.getElementById('pq-fb').innerHTML='';
-    document.getElementById('pq-open-wrap').style.display='none';
-    document.getElementById('pq-music-wrap').style.display='none';
+    document.getElementById('pq-open-input').style.display='none';
+    document.getElementById('pq-music-input').style.display='none';
     document.getElementById('pq-answers').innerHTML='';
+    document.getElementById('pq-music-wait').style.display='none';
+    showImg('pq');
 
-    renderImage('pq-img-wrap', image);
-
-    if(hasAudio){
-      // Show music waiting state; inputs revealed when timer_start fires
-      renderPlayerMusicWaiting('pq-audio-wrap', true);
-      const timerWrap = document.getElementById('pq-timer-wrap');
-      if(timerWrap) timerWrap.style.visibility = 'hidden';
-      // For multiple choice: show buttons but disabled
-      if(type==='multiple'){
-        document.getElementById('pq-answers').innerHTML=answers.map((a,i)=>
-          `<button class="ans-btn" disabled style="opacity:.4">${a}</button>`).join('');
-      }
+    if(type==='music'){
+      document.getElementById('pq-type-badge').innerHTML=`<span class="q-type-badge badge-music">🎵 Muziekvraag</span>`;
+      document.getElementById('pq-music-wait').style.display='block'; // wait for music
+    } else if(type==='multiple'){
+      document.getElementById('pq-type-badge').innerHTML=`<span class="q-type-badge badge-multiple">🔘 Meerkeuze</span>`;
+      document.getElementById('pq-answers').innerHTML=(answers||[]).map((a,i)=>`<button class="ans-btn a${i}" onclick="submitAnswer(${i})">${SH[i]}<br>${a}</button>`).join('');
+      startClientTimer(timeLeft);
     } else {
-      // No audio: show inputs immediately
-      revealPlayerInputs(type, answers);
+      document.getElementById('pq-type-badge').innerHTML=`<span class="q-type-badge badge-open">✏️ Open vraag</span>`;
+      document.getElementById('pq-open-input').style.display='block';
+      document.getElementById('pq-open-text').value='';
+      document.getElementById('pq-open-text').disabled=false;
+      document.getElementById('pq-submit-btn').disabled=false;
+      startClientTimer(timeLeft);
     }
-
-    show('s-pq');
-    // Store for use when timer_start fires
-    window._pendingQ = {type, answers, timeLimit, hasAudio};
+    show('s-player-q');
   }
 });
 
-// Host has stopped music → timer now starts, players can answer
-socket.on('question:timer_start',({timeLimit})=>{
-  const timerWrapH=document.getElementById('hq-timer-wrap');
-  if(timerWrapH) timerWrapH.style.visibility='visible';
-  if(role==='host'){
-    startTimer(timeLimit,'hq-timer-bar','hq-timer-num');
-  } else {
-    const timerWrapP=document.getElementById('pq-timer-wrap');
-    if(timerWrapP) timerWrapP.style.visibility='visible';
-    hidePlayerMusicWaiting('pq-audio-wrap');
-    const q=window._pendingQ||{};
-    revealPlayerInputs(q.type, q.answers);
-    startTimer(timeLimit,'pq-timer-bar','pq-timer-num');
+// Timer starts when host presses play (music questions)
+socket.on('music:timer_start',({timeLeft})=>{
+  startClientTimer(timeLeft);
+  if(role==='player'){
+    // Hide waiting, show input
+    document.getElementById('pq-music-wait').style.display='none';
+    document.getElementById('pq-music-input').style.display='block';
+    document.getElementById('pq-artist').value='';
+    document.getElementById('pq-title').value='';
+    document.getElementById('pq-artist').disabled=false;
+    document.getElementById('pq-title').disabled=false;
+    document.getElementById('pq-music-submit').disabled=false;
   }
 });
 
-function revealPlayerInputs(type, answers){
+socket.on('question:tick',({timeLeft})=>{
+  // Server tick keeps client in sync
+  currentTimeLeft=timeLeft;
+  const hEl=document.getElementById('hq-timer');
+  const pEl=document.getElementById('pq-timer');
+  if(hEl&&hEl.textContent!=='–'){hEl.textContent=timeLeft;hEl.classList.toggle('urgent',timeLeft<=5);}
+  if(pEl&&pEl.textContent!=='–'){pEl.textContent=timeLeft;pEl.classList.toggle('urgent',timeLeft<=5);}
+});
+
+socket.on('host:timer_expired',()=>{
+  // Timer ran out on open/music question — show a nudge but DON'T advance
+  const hint=document.createElement('p');
+  hint.style.cssText='font-size:12px;color:#633806;background:#FEF3E2;border-radius:8px;padding:6px 10px;margin-top:6px';
+  hint.textContent='⏱ Tijd is om — beoordeel de antwoorden en klik op "Klaar met beoordelen".';
+  const review=document.getElementById('hq-review');
+  if(review&&!review.querySelector('.timer-expired-hint')){
+    hint.className='timer-expired-hint';
+    review.prepend(hint);
+  }
+});
+
+socket.on('host:progress',({answered,total})=>{
+  if(el)el.textContent=`${answered} / ${total} geantwoord`;
+  if(answered>=total&&document.getElementById('hq-review').style.display==='none'){
+    document.getElementById('hq-next').style.display='block';
+  }
+});
+
+socket.on('host:open_answer',({playerId,name,text,autoCorrect,fuzzyScore})=>{
+  upsertAnswerCard(playerId,name,text,autoCorrect,fuzzyScore||0);
+});
+
+socket.on('host:music_answer',({playerId,name,artist,title,artistMatch,titleMatch})=>{
+  upsertMusicCard(playerId,name,artist,title,artistMatch,titleMatch);
+});
+
+socket.on('host:grade_ack',({playerId,correct,pts})=>{
+  const card=document.getElementById('ac-'+playerId);
+  if(card){
+    card.className='answer-card '+(pts>0?(pts<500?'graded-part':'graded-ok'):'graded-no');
+    const btns=document.getElementById('acb-'+playerId);
+    if(btns)btns.outerHTML=`<span class="grade-result ${pts>0?(pts<500?'part':'ok'):'no'}">${pts>0?`✓ ${pts} pt`:'✗ Fout'}</span>`;
+  }
+});
+
+socket.on('host:scoreboard_prompt',({scoreboard,isLast})=>{
+  stopClientTimer();
+  renderScoreboard(scoreboard,'Tussenstand',true,isLast,true);
+});
+
+socket.on('show:scoreboard',({scoreboard,isLast,sub})=>{
+  stopClientTimer();
+  renderScoreboard(scoreboard,sub||'Tussenstand',role==='host',isLast,false);
+});
+
+socket.on('player:waiting_host',()=>{
+  document.getElementById('pq-fb').innerHTML=`<div class="fb fb-neutral">⏳ Wachten op de host...</div>`;
+});
+
+socket.on('question:end',({type,correctAnswer,correctText,isLast})=>{
+  stopClientTimer();
   if(type==='multiple'){
-    document.getElementById('pq-answers').innerHTML=(answers||[]).map((a,i)=>
-      `<button class="ans-btn" onclick="playerAnswer(${i})">${a}</button>`).join('');
-  } else if(type==='open'){
-    document.getElementById('pq-open-wrap').style.display='block';
-    document.getElementById('pq-open-input').value='';
-    document.getElementById('pq-open-input').disabled=false;
-    document.querySelector('#pq-open-wrap .btn').disabled=false;
-  } else if(type==='music'){
-    document.getElementById('pq-music-wrap').style.display='block';
-    document.getElementById('pq-artist-input').value='';
-    document.getElementById('pq-title-input').value='';
-    document.getElementById('pq-artist-input').disabled=false;
-    document.getElementById('pq-title-input').disabled=false;
-    document.querySelector('#pq-music-wrap .btn').disabled=false;
+    document.querySelectorAll('#hq-answers .ans-btn').forEach((b,i)=>{
+      if(i===correctAnswer)b.style.outline='3px solid #3B6D11'; else b.style.opacity='.35';
+    });
+    document.querySelectorAll('#pq-answers .ans-btn').forEach((b,i)=>{
+      b.disabled=true; if(i===correctAnswer)b.classList.add('correct');
+    });
   }
-}
-
-socket.on('host:start_review',()=>{
-  stopTimer();
-  document.getElementById('hq-end-btn').style.display='none';
-  document.getElementById('hq-review-panel').style.display='block';
-  document.getElementById('hq-review-cards').innerHTML='<p style="color:var(--muted)">Wachten op antwoorden van spelers…</p>';
+  if(role==='host'&&(type==='multiple')){
+    document.getElementById('hq-next').style.display='block';
+  }
 });
 
-socket.on('host:review_update',({grades})=>{
-  if(!grades.length){
-    document.getElementById('hq-review-cards').innerHTML='<p style="color:var(--muted)">Nog geen antwoorden ontvangen.</p>';
-    return;
-  }
-  document.getElementById('hq-review-cards').innerHTML=grades.map(g=>{
-    if(g.isMusic){
-      // Music: two separate fields
-      const aTag=matchTag(g.artistResult);
-      const tTag=matchTag(g.titleResult);
-      // default pts suggestion
-      const suggestPts = (g.artistResult.ok?250:0)+(g.titleResult.ok?250:0);
-      return `<div class="review-card">
-        <div class="rc-head"><strong>${g.name}</strong> <span class="tag tag-purple">🎵 Muziek</span></div>
-        <div class="rc-answer">
-          🎤 Artiest: <strong>${g.artist||'—'}</strong> ${aTag}<br>
-          🎵 Titel: <strong>${g.title||'—'}</strong> ${tTag}
-        </div>
-        <div class="rc-btns">
-          <button class="btn btn-green btn-sm" onclick="hostGrade('${g.socketId}',true,500)">✅ Alles goed (500 pt)</button>
-          <button class="btn btn-yellow btn-sm" onclick="hostGrade('${g.socketId}',true,${suggestPts||250})">⚡ Deels goed (${suggestPts||250} pt)</button>
-          <button class="btn btn-red btn-sm" onclick="hostGrade('${g.socketId}',false,0)">❌ Fout (0 pt)</button>
-        </div>
-      </div>`;
-    } else {
-      const tag=matchTag(g.result);
-      return `<div class="review-card">
-        <div class="rc-head"><strong>${g.name}</strong> ${tag}</div>
-        <div class="rc-answer">"${g.answer}"</div>
-        <div class="rc-btns">
-          <button class="btn btn-green btn-sm" onclick="hostGrade('${g.socketId}',true,500)">✅ Goed</button>
-          <button class="btn btn-red btn-sm" onclick="hostGrade('${g.socketId}',false,0)">❌ Fout</button>
-        </div>
-      </div>`;
-    }
-  }).join('');
-});
-
-function matchTag(result){
-  if(!result) return '';
-  if(result.match==='exact') return '<span class="tag tag-green">Exact</span>';
-  if(result.match==='close') return '<span class="tag tag-orange">Bijna goed</span>';
-  if(result.match==='partial') return '<span class="tag tag-red">Deels</span>';
-  return '<span class="tag tag-gray">Fout</span>';
-}
-
-socket.on('host:scoreboard_decision',()=>{
-  document.getElementById('hq-scoreboard-decision').style.display='block';
-});
-
-socket.on('player:answer_ack',({correct,pts,correctText,showFeedback})=>{
-  if(!showFeedback){
-    document.getElementById('pq-fb').innerHTML=`<div class="fb fb-neutral">Antwoord ontvangen ✓</div>`;
-    return;
-  }
+socket.on('player:feedback',({correct,pts,correctAnswer,correctText})=>{
+  document.querySelectorAll('#pq-answers .ans-btn').forEach((b,i)=>{
+    b.disabled=true;if(i===correctAnswer)b.classList.add('correct');
+  });
   document.getElementById('pq-fb').innerHTML=correct
     ?`<div class="fb fb-ok">✅ Goed! +${pts} punten</div>`
     :`<div class="fb fb-no">❌ Helaas! Juist: <strong>${correctText}</strong></div>`;
 });
 
-socket.on('player:open_received',()=>{
-  document.getElementById('pq-fb').innerHTML=`<div class="fb fb-neutral">Antwoord ontvangen ✓ — wacht op beoordeling host</div>`;
-});
+socket.on('player:open_received',()=>{});
 
-socket.on('player:grade_update',({correct,pts,showFeedback})=>{
-  if(!showFeedback) return;
-  document.getElementById('pq-fb').innerHTML=correct
-    ?`<div class="fb fb-ok">✅ Goed gekeurd! +${pts} punten</div>`
-    :`<div class="fb fb-no">❌ Afgekeurd door de host.</div>`;
-});
-
-socket.on('question:end',({type,correctAnswer,correctText,correctArtist,correctTitle})=>{
-  stopTimer();
-  if(role==='host'){
-    document.getElementById('hq-end-btn').style.display='none';
-    document.getElementById('hq-next').style.display='block';
-    if(type==='multiple'){
-      document.querySelectorAll('#hq-answers .ans-btn').forEach((b,i)=>{
-        if(i===correctAnswer) b.style.outline='3px solid #43d17a';
-        else b.style.opacity='.35';
-      });
-    }
+socket.on('player:grade_update',({correct,pts,artistCorrect,titleCorrect})=>{
+  let msg='';
+  if(pts>0&&pts<500){
+    const parts=[];
+    if(artistCorrect)parts.push('artiest ✓');
+    if(titleCorrect)parts.push('titel ✓');
+    msg=`<div class="fb fb-part">⚡ Deels goed (${parts.join(' + ')}) — +${pts} punten</div>`;
+  } else if(correct){
+    msg=`<div class="fb fb-ok">✅ Goed gekeurd! +${pts} punten</div>`;
+  } else {
+    msg=`<div class="fb fb-no">❌ Helaas, afgekeurd door de host.</div>`;
   }
-});
-
-socket.on('scoreboard:show',({scoreboard,isLast})=>{
-  renderScoreboard(scoreboard,role==='host',isLast);
+  document.getElementById('pq-fb').innerHTML=msg;
 });
 
 socket.on('quiz:end',({scoreboard,history})=>{
-  stopTimer();
-  const maxScore=scoreboard.length>0?Math.max(...scoreboard.map(p=>p.score),1):1;
+  stopClientTimer();
+  maxScore=scoreboard.length>0?Math.max(...scoreboard.map(p=>p.score),1):1;
   document.getElementById('end-list').innerHTML=scoreboard.map((p,i)=>{
     const pct=Math.max(2,Math.round(p.score/maxScore*100));
     return `<div class="score-row">
@@ -1012,24 +912,26 @@ socket.on('quiz:end',({scoreboard,history})=>{
       <span class="s-pts">${p.score.toLocaleString()} pt</span>
     </div>`;
   }).join('');
-  if(history){
+
+  if(history&&history.length){
     document.getElementById('end-history').style.display='block';
     document.getElementById('end-history-list').innerHTML=history.map(h=>`
-      <div class="hist-item ${h.correct?'correct':'wrong'}">
-        <div class="hi-q">${h.text}</div>
-        <div class="hi-ans">Jij: <strong>${h.yourAnswer}</strong>${!h.correct?` — Juist: <strong>${h.correctAnswer}</strong>`:''} &nbsp;<span style="color:var(--yellow)">+${h.pts} pt</span></div>
+      <div class="hist-item">
+        <div class="hist-q">${h.text}</div>
+        <div class="hist-ans ${h.correct?'correct':'wrong'}">
+          Jij: <strong>${h.yourAnswer}</strong>
+          ${!h.correct?` — Juist: <strong>${h.correctAnswer}</strong>`:''}
+          &nbsp;<span style="color:#534AB7">+${h.pts} pt</span>
+        </div>
       </div>`).join('');
-  } else {
-    document.getElementById('end-history').style.display='none';
   }
   show('s-end');
 });
 
 socket.on('error',msg=>alert(msg));
-function resetAll(){ location.reload(); }
+function resetAll(){location.reload();}
 
-// Init with one blank question
-addQuestion('multiple');
+renderEditor();
 </script>
 </body>
 </html>

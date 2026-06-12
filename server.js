@@ -1,442 +1,409 @@
 require('dotenv').config();
-
 const express = require('express');
 const http = require('http');
 const https = require('https');
 const { Server } = require('socket.io');
-const SpotifyWebApi = require('spotify-web-api-node');
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
-const PORT = process.env.PORT || 3000;
+const io = new Server(server, { cors: { origin: '*' } });
+app.use(express.static(path.join(__dirname, 'public')));
 
-// ── Pexels API key — vul hier je eigen key in (gratis op pexels.com/api) ──
+// URL routing: /join/:code serves the same index.html, code is read by JS
+app.get('/join/:code', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// ── Pexels proxy ──────────────────────────────────────────────────────────
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY || '';
-
-app.use(express.static('public'));
-
-// ── Pexels proxy route (key nooit zichtbaar in frontend) ──────────────────
 app.get('/api/pexels', (req, res) => {
   const q = req.query.q;
   if (!q) return res.status(400).json({ error: 'missing query' });
   if (!PEXELS_API_KEY) return res.status(503).json({ error: 'no_key' });
-
   const url = `https://api.pexels.com/v1/search?query=${encodeURIComponent(q)}&per_page=6&orientation=landscape`;
-  const options = { headers: { Authorization: PEXELS_API_KEY } };
-
-  https.get(url, options, r => {
+  https.get(url, { headers: { Authorization: PEXELS_API_KEY } }, r => {
     let data = '';
     r.on('data', c => data += c);
     r.on('end', () => {
       try {
         const json = JSON.parse(data);
-        const photos = (json.photos || []).map(p => ({
-          thumb: p.src.medium,
-          full: p.src.large,
-          alt: p.alt || '',
-          photographer: p.photographer,
-          pexels_url: p.url
-        }));
-        res.json({ photos });
-      } catch(e) {
-        res.status(500).json({ error: 'parse_error' });
-      }
+        res.json({ photos: (json.photos||[]).map(p => ({ thumb: p.src.medium, full: p.src.large, alt: p.alt||'', photographer: p.photographer })) });
+      } catch(e) { res.status(500).json({ error: 'parse_error' }); }
     });
   }).on('error', e => res.status(500).json({ error: e.message }));
 });
 
-// ── Spotify preview search route ──────────────────────────────────────────
-let spotifyToken = null;
-let spotifyTokenExpiry = 0;
-
-async function getSpotifyToken() {
-  if (spotifyToken && Date.now() < spotifyTokenExpiry) return spotifyToken;
-  const api = new SpotifyWebApi({
-    clientId: process.env.SPOTIFY_CLIENT_ID,
-    clientSecret: process.env.SPOTIFY_CLIENT_SECRET
-  });
-  const data = await api.clientCredentialsGrant();
-  spotifyToken = data.body['access_token'];
-  spotifyTokenExpiry = Date.now() + (data.body['expires_in'] - 60) * 1000;
-  return spotifyToken;
-}
-
-app.get('/api/spotify-search', async (req, res) => {
+// ── Deezer proxy ──────────────────────────────────────────────────────────
+app.get('/api/deezer-search', (req, res) => {
   const q = req.query.q;
-  const artist = req.query.artist || '';
   if (!q) return res.status(400).json({ error: 'missing query' });
-  if (!process.env.SPOTIFY_CLIENT_ID || !process.env.SPOTIFY_CLIENT_SECRET)
-    return res.status(503).json({ error: 'no_key' });
-  try {
-    const token = await getSpotifyToken();
-    const api = new SpotifyWebApi();
-    api.setAccessToken(token);
-
-    const query = artist ? `track:${q} artist:${artist}` : q;
-    const result = await api.searchTracks(query, { limit: 10 });
-    const tracks = result.body.tracks.items.map(t => ({
-      name: `${t.name} - ${t.artists.map(a => a.name).join(', ')}`,
-      spotifyUrl: t.external_urls.spotify,
-      previewUrl: t.preview_url || null,
-      albumName: t.album.name,
-      releaseDate: t.album.release_date,
-      popularity: t.popularity,
-    }));
-    res.json({ tracks });
-  } catch(e) {
-    res.status(500).json({ error: e.message });
-  }
+  const url = `https://api.deezer.com/search/track?q=${encodeURIComponent(q)}&limit=10`;
+  https.get(url, r => {
+    let data = '';
+    r.on('data', c => data += c);
+    r.on('end', () => {
+      try {
+        const json = JSON.parse(data);
+        if (json.error) return res.status(500).json({ error: json.error.message });
+        const tracks = (json.data||[]).map(t => ({
+          id: t.id, title: t.title, artist: t.artist.name,
+          album: t.album.title, cover: t.album.cover_small,
+          previewUrl: t.preview || null, deezerUrl: t.link,
+        }));
+        res.json({ tracks });
+      } catch(e) { res.status(500).json({ error: 'parse_error' }); }
+    });
+  }).on('error', e => res.status(500).json({ error: e.message }));
 });
 
-// ── helpers ───────────────────────────────────────────────────────────────
-function makeCode() {
-  return String(Math.floor(1000 + Math.random() * 9000));
-}
+const lobbies = {};
 
-function levenshtein(a, b) {
-  a = a.toLowerCase().trim();
-  b = b.toLowerCase().trim();
-  const dp = Array.from({ length: a.length + 1 }, (_, i) =>
-    Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
-  );
-  for (let i = 1; i <= a.length; i++)
-    for (let j = 1; j <= b.length; j++)
-      dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1]
-        : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
-  return dp[a.length][b.length];
-}
-
-function fuzzyMatch(answer, correct) {
-  const a = answer.toLowerCase().trim();
-  const c = correct.toLowerCase().trim();
-  if (!c) return { match: 'exact', ok: true };
-  if (a === c) return { match: 'exact', ok: true };
-  const dist = levenshtein(a, c);
-  const threshold = Math.max(1, Math.floor(c.length * 0.25));
-  if (dist <= threshold) return { match: 'close', ok: true };
-  if (dist <= threshold * 2) return { match: 'partial', ok: false };
-  return { match: 'none', ok: false };
-}
-
-// ── state ─────────────────────────────────────────────────────────────────
-const rooms = {};
-
-function createRoom(hostId) {
-  const code = makeCode();
-  rooms[code] = {
-    code, hostId,
-    players: {},      // socketId → { name, score, answers: [] }
-    quiz: null,
-    current: -1,
-    timer: null,
-    phase: 'lobby',
-    scoreboardMode: 'always',
-    showFeedback: true,
-    pendingGrades: {},
-  };
+function genCode() {
+  let code;
+  do { code = String(Math.floor(1000 + Math.random() * 9000)); } while (lobbies[code]);
   return code;
 }
 
-function getScoreboard(room) {
-  return Object.values(room.players)
-    .sort((a, b) => b.score - a.score)
-    .map((p, i) => ({ name: p.name, score: p.score, rank: i + 1 }));
+function getScoreboard(lobby) {
+  return [...lobby.players].sort((a,b) => b.score - a.score)
+    .map((p,i) => ({ rank:i+1, name:p.name, score:p.score }));
 }
 
-// ── socket ────────────────────────────────────────────────────────────────
-io.on('connection', socket => {
+function normalize(s) {
+  return s.toLowerCase().trim().replace(/[.,!?'"-]/g,'').replace(/\s+/g,' ');
+}
 
-  socket.on('host:create', ({ quiz, scoreboardMode, showFeedback }) => {
-    const code = createRoom(socket.id);
-    const room = rooms[code];
-    room.quiz = quiz;
-    room.scoreboardMode = scoreboardMode || 'always';
-    room.showFeedback = showFeedback !== false;
-    socket.join(code);
+function levenshtein(a, b) {
+  const m=a.length, n=b.length;
+  const dp=Array.from({length:m+1},(_,i)=>Array.from({length:n+1},(_,j)=>i===0?j:j===0?i:0));
+  for(let i=1;i<=m;i++) for(let j=1;j<=n;j++)
+    dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);
+  return dp[m][n];
+}
+
+function fuzzyMatch(input, correctAnswers) {
+  const norm=normalize(input);
+  for(const ans of correctAnswers){
+    const normAns=normalize(ans);
+    if(norm===normAns) return {match:true,score:1.0};
+    const maxDist=Math.max(1,Math.floor(normAns.length/4));
+    const dist=levenshtein(norm,normAns);
+    const similarity=1-dist/Math.max(norm.length,normAns.length);
+    if(dist<=maxDist&&similarity>=0.75) return {match:true,score:similarity};
+  }
+  return {match:false,score:0};
+}
+
+io.on('connection', (socket) => {
+
+  socket.on('host:create', ({ questions, settings }) => {
+    const code = genCode();
+    lobbies[code] = {
+      hostId: socket.id, players: [], questions,
+      settings: settings||{scoreboardMode:'always'},
+      currentQ: 0, phase: 'lobby', timer: null,
+      answeredCount: 0, openAnswers: {},
+      musicPhase: false // true while waiting for host to start music
+    };
+    socket.join(code); socket.data.code=code; socket.data.role='host';
     socket.emit('host:created', { code });
   });
 
   socket.on('player:join', ({ code, name }) => {
-    const room = rooms[code];
-    if (!room) return socket.emit('error', 'Kamer niet gevonden.');
-    if (room.phase !== 'lobby') return socket.emit('error', 'Quiz is al begonnen.');
-    if (Object.values(room.players).some(p => p.name === name))
-      return socket.emit('error', 'Naam al in gebruik.');
-    room.players[socket.id] = { name, score: 0, answers: [] };
-    socket.join(code);
-    socket.emit('player:joined', { name });
-    io.to(code).emit('lobby:update', {
-      players: Object.values(room.players).map(p => p.name)
+    const lobby = lobbies[code];
+    if(!lobby) return socket.emit('error','Lobby niet gevonden.');
+    if(lobby.phase!=='lobby') return socket.emit('error','Quiz is al gestart.');
+    if(lobby.players.find(p=>p.name===name)) return socket.emit('error','Naam al in gebruik.');
+    lobby.players.push({
+      id:socket.id, name, score:0, answered:false,
+      lastAnswer:null, lastCorrect:null, lastPts:0,
+      history:[] // [{qIndex, yourAnswer, correct, correctAnswer, pts}]
     });
+    socket.join(code); socket.data.code=code; socket.data.role='player'; socket.data.name=name;
+    socket.emit('player:joined',{name});
+    io.to(code).emit('lobby:update',{players:lobby.players.map(p=>p.name)});
   });
 
-  socket.on('host:start', ({ code }) => {
-    const room = rooms[code];
-    if (!room || room.hostId !== socket.id) return;
-    sendQuestion(room, 0);
+  socket.on('host:start', () => {
+    const lobby=lobbies[socket.data.code];
+    if(!lobby||lobby.hostId!==socket.id) return;
+    lobby.currentQ=0; startQuestion(socket.data.code);
   });
 
-  socket.on('host:next', ({ code }) => {
-    const room = rooms[code];
-    if (!room || room.hostId !== socket.id) return;
-    const nextIdx = room.current + 1;
-    if (nextIdx >= room.quiz.length) return endQuiz(room);
-    sendQuestion(room, nextIdx);
-  });
-
-  socket.on('host:show_scoreboard', ({ code }) => {
-    const room = rooms[code];
-    if (!room || room.hostId !== socket.id) return;
-    io.to(code).emit('scoreboard:show', {
-      scoreboard: getScoreboard(room),
-      isLast: room.current >= room.quiz.length - 1
-    });
-  });
-
-  socket.on('host:skip_scoreboard', ({ code }) => {
-    const room = rooms[code];
-    if (!room || room.hostId !== socket.id) return;
-    const nextIdx = room.current + 1;
-    if (nextIdx >= room.quiz.length) return endQuiz(room);
-    sendQuestion(room, nextIdx);
-  });
-
-  // ── Multiple choice answer ──────────────────────────────────────────────
-  socket.on('player:answer', ({ code, answer, timeLeft }) => {
-    const room = rooms[code];
-    if (!room || room.phase !== 'question') return;
-    const q = room.quiz[room.current];
-    if (q.type !== 'multiple') return;
-    const player = room.players[socket.id];
-    if (!player || player.answers[room.current] !== undefined) return;
-
-    const correct = answer === q.correctAnswer;
-    const pts = correct ? Math.max(100, Math.round(500 * (timeLeft / q.timeLimit))) : 0;
-    player.score += pts;
-    player.answers[room.current] = { answer, correct, pts };
-
-    socket.emit('player:answer_ack', {
-      correct, pts,
-      correctAnswer: correct ? null : q.correctAnswer,
-      correctText: correct ? null : q.answers[q.correctAnswer],
-      showFeedback: room.showFeedback
-    });
-
-    const answered = Object.values(room.players)
-      .filter(p => p.answers[room.current] !== undefined).length;
-    if (answered >= Object.keys(room.players).length) {
-      clearTimeout(room.timer);
-      endQuestion(room);
-    }
-  });
-
-  // ── Open answer ─────────────────────────────────────────────────────────
-  socket.on('player:open_answer', ({ code, answer }) => {
-    const room = rooms[code];
-    if (!room || room.phase !== 'question') return;
-    const q = room.quiz[room.current];
-    if (q.type !== 'open') return;
-    const player = room.players[socket.id];
-    if (!player || player.answers[room.current] !== undefined) return;
-
-    const result = fuzzyMatch(answer, q.correctAnswer);
-    player.answers[room.current] = { answer, result, pts: 0 };
-    socket.emit('player:open_received', {});
-
-    if (!room.pendingGrades[room.current]) room.pendingGrades[room.current] = {};
-    room.pendingGrades[room.current][socket.id] = { name: player.name, answer, result, graded: false };
-
-    emitReviewUpdate(room);
-  });
-
-  // ── Music answer (artiest + titel) ──────────────────────────────────────
-  socket.on('player:music_answer', ({ code, artist, title }) => {
-    const room = rooms[code];
-    if (!room || room.phase !== 'question') return;
-    const q = room.quiz[room.current];
-    if (q.type !== 'music') return;
-    const player = room.players[socket.id];
-    if (!player || player.answers[room.current] !== undefined) return;
-
-    const artistResult = fuzzyMatch(artist, q.correctArtist);
-    const titleResult  = fuzzyMatch(title,  q.correctTitle);
-
-    player.answers[room.current] = { artist, title, artistResult, titleResult, pts: 0 };
-    socket.emit('player:open_received', {});
-
-    if (!room.pendingGrades[room.current]) room.pendingGrades[room.current] = {};
-    room.pendingGrades[room.current][socket.id] = {
-      name: player.name, artist, title, artistResult, titleResult, graded: false, isMusic: true
-    };
-
-    emitReviewUpdate(room);
-  });
-
-  // ── Grade ───────────────────────────────────────────────────────────────
-  socket.on('host:grade', ({ code, playerId, correct, pts }) => {
-    const room = rooms[code];
-    if (!room || room.hostId !== socket.id) return;
-    const player = room.players[playerId];
-    if (!player) return;
-    const grade = room.pendingGrades[room.current]?.[playerId];
-    if (!grade) return;
-
-    grade.graded = true;
-    const awarded = correct ? (pts !== undefined ? pts : 500) : 0;
-    player.score += awarded;
-    player.answers[room.current].pts = awarded;
-    player.answers[room.current].correct = correct;
-
-    io.to(playerId).emit('player:grade_update', { correct, pts: awarded, showFeedback: room.showFeedback });
-  });
-
-  socket.on('host:review_done', ({ code }) => {
-    const room = rooms[code];
-    if (!room || room.hostId !== socket.id) return;
-    endQuestion(room);
-  });
-
-  // ── Host signals music has stopped → start timer now ───────────────────
-  socket.on('host:music_done', ({ code }) => {
-    const room = rooms[code];
-    if (!room || room.hostId !== socket.id) return;
-    if (room.phase !== 'music_playing') return;
-    const q = room.quiz[room.current];
-    const timeLimit = q.timeLimit || (q.type === 'open' ? 30 : q.type === 'music' ? 45 : 15);
-    room.phase = 'question';
-    // Tell everyone the timer is now starting
-    io.to(room.code).emit('question:timer_start', { timeLimit });
-    room.timer = setTimeout(() => {
-      const t = room.quiz[room.current].type;
-      if (t === 'open' || t === 'music') {
-        room.phase = 'review';
-        io.to(room.hostId).emit('host:start_review');
-      } else {
-        endQuestion(room);
+  // Host starts music playback → start the timer now
+  socket.on('host:music_started', () => {
+    const code=socket.data.code; const lobby=lobbies[code];
+    if(!lobby||lobby.hostId!==socket.id) return;
+    if(!lobby.musicPhase) return;
+    lobby.musicPhase = false;
+    const q=lobby.questions[lobby.currentQ];
+    lobby.timeLeft = q.timeLimit||45;
+    // Tell players: timer is starting, show input fields
+    io.to(code).emit('music:timer_start', { timeLeft: lobby.timeLeft });
+    lobby.timer=setInterval(()=>{
+      lobby.timeLeft--;
+      io.to(code).emit('question:tick',{timeLeft:lobby.timeLeft});
+      if(lobby.timeLeft<=0){
+        clearInterval(lobby.timer);
+        lobby.phase='review';
+        io.to(lobby.hostId).emit('host:timer_expired');
       }
-    }, timeLimit * 1000);
+    },1000);
   });
 
-  socket.on('host:end_question', ({ code }) => {
-    const room = rooms[code];
-    if (!room || room.hostId !== socket.id) return;
-    clearTimeout(room.timer);
-    const type = room.quiz[room.current].type;
-    if (type === 'open' || type === 'music') {
-      room.phase = 'review';
-      io.to(room.hostId).emit('host:start_review');
-    } else {
-      endQuestion(room);
+  socket.on('player:answer', ({ answerIndex }) => {
+    const code=socket.data.code; const lobby=lobbies[code];
+    if(!lobby||lobby.phase!=='question') return;
+    const player=lobby.players.find(p=>p.id===socket.id);
+    if(!player||player.answered) return;
+    const q=lobby.questions[lobby.currentQ];
+    if(q.type==='open'||q.type==='music') return;
+    player.answered=true; player.lastAnswer=answerIndex;
+    const correct=answerIndex===q.correct;
+    const pts=correct?Math.max(500,lobby.timeLeft*100):0;
+    player.score+=pts; player.lastPts=pts; player.lastCorrect=correct;
+    player.history.push({
+      qIndex:lobby.currentQ, yourAnswer:q.answers[answerIndex],
+      correct, correctAnswer:q.answers[q.correct], pts
+    });
+    lobby.answeredCount++;
+    socket.emit('player:feedback',{correct,pts,correctAnswer:q.correct,correctText:q.answers[q.correct]});
+    io.to(lobby.hostId).emit('host:progress',{answered:lobby.answeredCount,total:lobby.players.length});
+    if(lobby.answeredCount>=lobby.players.length){
+      clearInterval(lobby.timer); endQuestion(code);
     }
+  });
+
+  socket.on('player:open_answer', ({ text }) => {
+    const code=socket.data.code; const lobby=lobbies[code];
+    if(!lobby||lobby.phase!=='question') return;
+    const player=lobby.players.find(p=>p.id===socket.id);
+    if(!player||player.answered) return;
+    const q=lobby.questions[lobby.currentQ];
+    if(q.type!=='open') return;
+    player.answered=true; player.lastAnswer=text;
+    const {match,score}=fuzzyMatch(text,q.correctAnswers||[]);
+    player.lastCorrect=match;
+    const pts=match?Math.max(500,lobby.timeLeft*100):0;
+    player.score+=pts; player.lastPts=pts;
+    lobby.answeredCount++;
+    lobby.openAnswers[socket.id]={playerId:socket.id,name:player.name,text,autoCorrect:match,fuzzyScore:score};
+    socket.emit('player:open_received',{text,autoCorrect:match});
+    io.to(lobby.hostId).emit('host:open_answer',{playerId:socket.id,name:player.name,text,autoCorrect:match,fuzzyScore:score});
+    io.to(lobby.hostId).emit('host:progress',{answered:lobby.answeredCount,total:lobby.players.length});
+  });
+
+  // Music question: player submits artist + title
+  socket.on('player:music_answer', ({ artist, title }) => {
+    const code=socket.data.code; const lobby=lobbies[code];
+    if(!lobby||lobby.phase!=='question') return;
+    const player=lobby.players.find(p=>p.id===socket.id);
+    if(!player||player.answered) return;
+    const q=lobby.questions[lobby.currentQ];
+    if(q.type!=='music') return;
+    player.answered=true;
+    const artistMatch=fuzzyMatch(artist, [q.correctArtist||'']);
+    const titleMatch=fuzzyMatch(title, [q.correctTitle||'']);
+    player.lastAnswer=`${artist} / ${title}`;
+    player.lastCorrect=false; // graded by host
+    player.lastPts=0;
+    lobby.answeredCount++;
+    lobby.openAnswers[socket.id]={
+      playerId:socket.id, name:player.name,
+      artist, title, artistMatch, titleMatch,
+      isMusic:true, graded:false
+    };
+    socket.emit('player:open_received',{text:`${artist} / ${title}`,autoCorrect:false});
+    io.to(lobby.hostId).emit('host:music_answer',{
+      playerId:socket.id, name:player.name,
+      artist, title, artistMatch, titleMatch
+    });
+    io.to(lobby.hostId).emit('host:progress',{answered:lobby.answeredCount,total:lobby.players.length});
+  });
+
+  socket.on('host:grade', ({ playerId, correct, artistCorrect, titleCorrect }) => {
+    const code=socket.data.code; const lobby=lobbies[code];
+    if(!lobby||lobby.hostId!==socket.id) return;
+    const player=lobby.players.find(p=>p.id===playerId);
+    if(!player) return;
+    const q=lobby.questions[lobby.currentQ];
+    const wasCorrect=player.lastCorrect;
+
+    let pts=0;
+    if(q.type==='music'){
+      // partial scoring: 250 per correct field
+      if(artistCorrect) pts+=250;
+      if(titleCorrect) pts+=250;
+    } else {
+      pts=correct?(Math.max(500,(lobby.timeLeft||0)*100)):0;
+    }
+
+    if(!wasCorrect&&pts>0){
+      player.score+=pts; player.lastPts=pts; player.lastCorrect=pts===500||pts>0;
+    } else if(wasCorrect&&!correct){
+      player.score-=(player.lastPts||0); player.lastPts=0; player.lastCorrect=false;
+    }
+
+    // Save to history
+    const ans=lobby.openAnswers[playerId];
+    if(ans){
+      let yourAnswer, correctAnswer;
+      if(q.type==='music'){
+        yourAnswer=`${ans.artist} / ${ans.title}`;
+        correctAnswer=`${q.correctArtist} / ${q.correctTitle}`;
+      } else {
+        yourAnswer=ans.text;
+        correctAnswer=(q.correctAnswers||[]).join(', ');
+      }
+      player.history.push({
+        qIndex:lobby.currentQ, yourAnswer, correct:pts>0,
+        correctAnswer, pts, artistCorrect, titleCorrect
+      });
+    }
+
+    io.to(playerId).emit('player:grade_update',{correct:pts>0,pts,artistCorrect,titleCorrect});
+    socket.emit('host:grade_ack',{playerId,correct:pts>0,pts});
+  });
+
+  socket.on('host:end_question', () => {
+    const code=socket.data.code; const lobby=lobbies[code];
+    if(!lobby||lobby.hostId!==socket.id) return;
+    clearInterval(lobby.timer);
+    lobby.phase='scores';
+    endQuestion(code);
+  });
+
+  socket.on('host:scoreboard_decision', ({ show }) => {
+    const code=socket.data.code; const lobby=lobbies[code];
+    if(!lobby||lobby.hostId!==socket.id) return;
+    const isLast=lobby.currentQ+1>=lobby.questions.length;
+    if(show){
+      io.to(code).emit('show:scoreboard',{scoreboard:getScoreboard(lobby),isLast,sub:'Tussenstand'});
+    } else {
+      lobby.currentQ++;
+      if(lobby.currentQ>=lobby.questions.length) endQuiz(code); else startQuestion(code);
+    }
+  });
+
+  socket.on('host:next', () => {
+    const code=socket.data.code; const lobby=lobbies[code];
+    if(!lobby||lobby.hostId!==socket.id) return;
+    lobby.currentQ++;
+    if(lobby.currentQ>=lobby.questions.length) endQuiz(code); else startQuestion(code);
   });
 
   socket.on('disconnect', () => {
-    for (const [code, room] of Object.entries(rooms)) {
-      if (room.hostId === socket.id) {
-        io.to(code).emit('error', 'Host heeft de verbinding verbroken.');
-        delete rooms[code];
-      } else if (room.players[socket.id]) {
-        delete room.players[socket.id];
-        io.to(code).emit('lobby:update', {
-          players: Object.values(room.players).map(p => p.name)
-        });
-      }
+    const code=socket.data.code;
+    if(!code||!lobbies[code]) return;
+    const lobby=lobbies[code];
+    if(lobby.hostId===socket.id){
+      io.to(code).emit('error','Host heeft de verbinding verbroken.');
+      clearInterval(lobby.timer); delete lobbies[code];
+    } else {
+      lobby.players=lobby.players.filter(p=>p.id!==socket.id);
+      io.to(code).emit('lobby:update',{players:lobby.players.map(p=>p.name)});
     }
   });
 });
 
-function emitReviewUpdate(room) {
-  const grades = Object.entries(room.pendingGrades[room.current] || {}).map(([sid, g]) => ({
-    socketId: sid, ...g
-  }));
-  io.to(room.hostId).emit('host:review_update', { grades });
-}
+function startQuestion(code) {
+  const lobby=lobbies[code];
+  lobby.phase='question'; lobby.answeredCount=0; lobby.openAnswers={};
+  lobby.players.forEach(p=>{p.answered=false;p.lastAnswer=null;p.lastCorrect=null;p.lastPts=0;});
+  const q=lobby.questions[lobby.currentQ];
+  const isMusic = q.type==='music';
 
-function startQuestionTimer(room, timeLimit) {
-  room.timer = setTimeout(() => {
-    const t = room.quiz[room.current].type;
-    if (t === 'open' || t === 'music') {
-      room.phase = 'review';
-      io.to(room.hostId).emit('host:start_review');
-    } else {
-      endQuestion(room);
-    }
-  }, timeLimit * 1000);
-}
-
-function sendQuestion(room, idx) {
-  room.current = idx;
-  const q = room.quiz[idx];
-  const isLast = idx === room.quiz.length - 1;
-  const timeLimit = q.timeLimit || (q.type === 'open' ? 30 : q.type === 'music' ? 45 : 15);
-  const hasAudio = !!q.audio;
-
-  // If audio present: hold in music_playing phase; timer starts only after host:music_done
-  room.phase = hasAudio ? 'music_playing' : 'question';
-
-  const base = { idx, total: room.quiz.length, text: q.text, type: q.type, timeLimit, isLast,
-                 image: q.image || null, hasAudio };
-  const hostPkt   = { ...base, audio: q.audio || null,
-                      correctAnswer: q.correctAnswer, correctArtist: q.correctArtist,
-                      correctTitle: q.correctTitle, answers: q.answers };
-  const playerPkt = { ...base, audio: null,
-                      answers: q.type === 'multiple' ? q.answers : null };
-
-  io.to(room.hostId).emit('question:start', hostPkt);
-  Object.keys(room.players).forEach(pid => io.to(pid).emit('question:start', playerPkt));
-
-  if (!hasAudio) startQuestionTimer(room, timeLimit);
-  // With audio: timer starts when host fires host:music_done
-}
-
-function endQuestion(room) {
-  room.phase = 'scoreboard';
-  const q = room.quiz[room.current];
-  const isLast = room.current >= room.quiz.length - 1;
-  const scoreboard = getScoreboard(room);
-
-  io.to(room.code).emit('question:end', {
-    type: q.type,
-    correctAnswer: q.correctAnswer,
-    correctText: q.type === 'multiple' ? q.answers[q.correctAnswer] : q.correctAnswer,
-    correctArtist: q.correctArtist,
-    correctTitle: q.correctTitle,
-    scoreboard, isLast
-  });
-
-  if (room.scoreboardMode === 'always') {
-    io.to(room.code).emit('scoreboard:show', { scoreboard, isLast });
-  } else if (room.scoreboardMode === 'host') {
-    io.to(room.hostId).emit('host:scoreboard_decision', { scoreboard, isLast });
+  if(isMusic){
+    // Music phase: timer does NOT start yet, host must press play
+    lobby.musicPhase=true;
+    lobby.timeLeft=q.timeLimit||45;
+    io.to(code).emit('question:start',{
+      index:lobby.currentQ, total:lobby.questions.length,
+      text:q.text||'Raad het nummer! 🎵', type:'music',
+      audio:q.audio||null, timeLeft:q.timeLimit||45,
+      image:q.image||null,
+      musicPhase:true
+    });
+  } else {
+    lobby.musicPhase=false;
+    lobby.timeLeft=q.timeLimit||15;
+    io.to(code).emit('question:start',{
+      index:lobby.currentQ, total:lobby.questions.length,
+      text:q.text, type:q.type||'multiple', answers:q.answers||[],
+      timeLeft:lobby.timeLeft,
+      image:q.image||null,
+      musicPhase:false
+    });
+    lobby.timer=setInterval(()=>{
+      lobby.timeLeft--;
+      io.to(code).emit('question:tick',{timeLeft:lobby.timeLeft});
+      if(lobby.timeLeft<=0){
+        clearInterval(lobby.timer);
+        if(q.type==='open'){
+          // Timer expired: signal host to start review, don't auto-advance
+          lobby.phase='review';
+          io.to(lobby.hostId).emit('host:timer_expired');
+          io.to(code).emit('question:tick',{timeLeft:0});
+        } else {
+          endQuestion(code);
+        }
+      }
+    },1000);
   }
 }
 
-function endQuiz(room) {
-  room.phase = 'end';
-  const scoreboard = getScoreboard(room);
+function endQuestion(code) {
+  const lobby=lobbies[code];
+  lobby.phase='scores';
+  const q=lobby.questions[lobby.currentQ];
+  const isLast=lobby.currentQ+1>=lobby.questions.length;
+  const mode=lobby.settings.scoreboardMode||'always';
 
-  Object.entries(room.players).forEach(([pid, player]) => {
-    const history = room.quiz.map((q, i) => {
-      const ans = player.answers[i];
-      let yourAnswer = '—';
-      let correctAnswer = '';
-      if (q.type === 'multiple') {
-        yourAnswer = ans ? q.answers[ans.answer] : '—';
-        correctAnswer = q.answers[q.correctAnswer];
-      } else if (q.type === 'music') {
-        yourAnswer = ans ? `${ans.artist} / ${ans.title}` : '—';
-        correctAnswer = `${q.correctArtist} / ${q.correctTitle}`;
-      } else {
-        yourAnswer = ans ? ans.answer : '—';
-        correctAnswer = q.correctAnswer;
-      }
-      return { text: q.text, yourAnswer, correct: ans?.correct || false, correctAnswer, pts: ans?.pts || 0 };
-    });
-    io.to(pid).emit('quiz:end', { scoreboard, history });
+  let correctText='';
+  if(q.type==='open') correctText=(q.correctAnswers||[]).join(' / ');
+  else if(q.type==='music') correctText=`${q.correctArtist} / ${q.correctTitle}`;
+  else correctText=(q.answers||[])[q.correct];
+
+  io.to(code).emit('question:end',{
+    type:q.type||'multiple',
+    correctAnswer:q.correct,
+    correctText, isLast
   });
 
-  io.to(room.hostId).emit('quiz:end', { scoreboard, history: null });
+  if(mode==='always'||(mode==='end'&&isLast)){
+    io.to(code).emit('show:scoreboard',{scoreboard:getScoreboard(lobby),isLast,sub:isLast?'Eindstand':'Tussenstand'});
+  } else if(mode==='host'){
+    io.to(lobby.hostId).emit('host:scoreboard_prompt',{scoreboard:getScoreboard(lobby),isLast});
+    lobby.players.forEach(p=>io.to(p.id).emit('player:waiting_host'));
+  } else {
+    if(!isLast){ lobby.currentQ++; startQuestion(code); }
+    else io.to(code).emit('show:scoreboard',{scoreboard:getScoreboard(lobby),isLast:true,sub:'Eindstand'});
+  }
 }
 
-server.listen(PORT, () => console.log(`QuizBuzz v6.2 running on :${PORT}`));
+function endQuiz(code) {
+  const lobby=lobbies[code]; lobby.phase='ended';
+  const scoreboard=getScoreboard(lobby);
+  // Send each player their own history
+  lobby.players.forEach(p=>{
+    const history=lobby.questions.map((q,i)=>{
+      const h=p.history.find(x=>x.qIndex===i);
+      let correctAnswer='';
+      if(q.type==='open') correctAnswer=(q.correctAnswers||[]).join(' / ');
+      else if(q.type==='music') correctAnswer=`${q.correctArtist} / ${q.correctTitle}`;
+      else correctAnswer=(q.answers||[])[q.correct]||'';
+      return {
+        qIndex:i, text:q.text||'Raad het nummer! 🎵', type:q.type||'multiple',
+        yourAnswer:h?h.yourAnswer:'—', correct:h?h.correct:false,
+        correctAnswer, pts:h?h.pts:0
+      };
+    });
+    io.to(p.id).emit('quiz:end',{scoreboard,history});
+  });
+  io.to(lobby.hostId).emit('quiz:end',{scoreboard,history:null});
+  setTimeout(()=>delete lobbies[code],60000);
+}
+
+const PORT=process.env.PORT||3000;
+server.listen(PORT,()=>console.log(`QuizBuzz v7 draait op http://localhost:${PORT}`));
