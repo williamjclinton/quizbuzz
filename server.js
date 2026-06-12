@@ -4,7 +4,7 @@ const express = require('express');
 const http = require('http');
 const https = require('https');
 const { Server } = require('socket.io');
-const spotifyPreviewFinder = require('spotify-preview-finder');
+const SpotifyWebApi = require('spotify-web-api-node');
 
 const app = express();
 const server = http.createServer(app);
@@ -47,6 +47,21 @@ app.get('/api/pexels', (req, res) => {
 });
 
 // ── Spotify preview search route ──────────────────────────────────────────
+let spotifyToken = null;
+let spotifyTokenExpiry = 0;
+
+async function getSpotifyToken() {
+  if (spotifyToken && Date.now() < spotifyTokenExpiry) return spotifyToken;
+  const api = new SpotifyWebApi({
+    clientId: process.env.SPOTIFY_CLIENT_ID,
+    clientSecret: process.env.SPOTIFY_CLIENT_SECRET
+  });
+  const data = await api.clientCredentialsGrant();
+  spotifyToken = data.body['access_token'];
+  spotifyTokenExpiry = Date.now() + (data.body['expires_in'] - 60) * 1000;
+  return spotifyToken;
+}
+
 app.get('/api/spotify-search', async (req, res) => {
   const q = req.query.q;
   const artist = req.query.artist || '';
@@ -54,18 +69,18 @@ app.get('/api/spotify-search', async (req, res) => {
   if (!process.env.SPOTIFY_CLIENT_ID || !process.env.SPOTIFY_CLIENT_SECRET)
     return res.status(503).json({ error: 'no_key' });
   try {
-    // Use artist parameter if provided for higher accuracy
-    const result = artist
-      ? await spotifyPreviewFinder(q, artist, 10)
-      : await spotifyPreviewFinder(q, 10);
-    if (!result.success) return res.status(500).json({ error: result.error });
-    // Return all results, flag whether preview is available
-    const tracks = result.results.map(t => ({
-      name: t.name,
-      spotifyUrl: t.spotifyUrl,
-      previewUrl: t.previewUrls?.[0] || null,
-      albumName: t.albumName,
-      releaseDate: t.releaseDate,
+    const token = await getSpotifyToken();
+    const api = new SpotifyWebApi();
+    api.setAccessToken(token);
+
+    const query = artist ? `track:${q} artist:${artist}` : q;
+    const result = await api.searchTracks(query, { limit: 10 });
+    const tracks = result.body.tracks.items.map(t => ({
+      name: `${t.name} - ${t.artists.map(a => a.name).join(', ')}`,
+      spotifyUrl: t.external_urls.spotify,
+      previewUrl: t.preview_url || null,
+      albumName: t.album.name,
+      releaseDate: t.album.release_date,
       popularity: t.popularity,
     }));
     res.json({ tracks });
